@@ -1,0 +1,11 @@
+# Aletheia built-in IOC list.
+# This file is intentionally small: real coverage comes from threat-intel feeds.
+#   aletheia feeds update            -> downloads free abuse.ch feeds to ~/.aletheia/feeds
+#   aletheia scan --ioc my_iocs.txt  -> add case-specific indicators (txt/csv/json/STIX 2.1/MISP)
+#
+# Format: one indicator per line (hash / IP / domain / URL), or "filename:<name>".
+
+# EICAR anti-malware test file - harmless, used to prove the pipeline works end-to-end
+275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f  # EICAR test file (sha256)
+3395856ce81f2b7382dee72602f798b642f14140  # EICAR test file (sha1)
+44d88612fea8a8f36de82e1278abb02f  # EICAR test file (md5)

@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aletheia-dfir"
+dynamic = ["version"]
+description = "Read-only IOC hunting & forensic triage with court-ready, hash-sealed reports and human-approved remediation"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "sneh1309" }]
+keywords = ["dfir", "forensics", "incident-response", "ioc", "threat-hunting", "mitre-attack", "yara", "chain-of-custody"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Topic :: Security",
+  "Intended Audience :: Information Technology",
+]
+dependencies = []   # core is pure standard library on purpose: nothing to install on a suspect machine
+
+[project.optional-dependencies]
+yara = ["yara-python>=4.3"]
+dev = ["pytest", "ruff"]
+
+[project.scripts]
+aletheia = "aletheia.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/sneh1309/IOC"
+Issues = "https://github.com/sneh1309/IOC/issues"
+
+[tool.setuptools.dynamic]
+version = { attr = "aletheia.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["aletheia*"]
+
+[tool.setuptools.package-data]
+aletheia = ["data/yara/*.yar", "data/ioc/*.txt"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py39"

@@ -1,0 +1,10 @@
+{
+  "name": "aletheia",
+  "version": "1.0.0",
+  "description": "Read-only IOC hunting & forensic triage of the local device with court-ready, hash-sealed reports, plus a separate human-approved remediation stage.",
+  "author": { "name": "sneh1309" },
+  "homepage": "https://github.com/sneh1309/IOC",
+  "repository": "https://github.com/sneh1309/IOC",
+  "license": "MIT",
+  "keywords": ["dfir", "forensics", "ioc", "incident-response", "threat-hunting", "mitre-attack", "yara", "blue-team"]
+}
