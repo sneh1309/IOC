@@ -5,6 +5,6 @@
   "author": { "name": "sneh1309" },
   "homepage": "https://github.com/sneh1309/IOC",
   "repository": "https://github.com/sneh1309/IOC",
-  "license": "Apache-2.0",
+  "license": "MIT",
   "keywords": ["dfir", "forensics", "ioc", "incident-response", "threat-hunting", "mitre-attack", "yara", "blue-team"]
 }

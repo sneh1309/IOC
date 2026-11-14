@@ -9,4 +9,4 @@ Thanks for helping make Aletheia better.
 5. Every new remediation action must implement pre-check → backup → execute → verify → rollback, and must be added to `planner.py` (order, reversibility, risk text) and `frameworks.D3FEND`.
 6. Run `ruff check aletheia tests --select E9,F` and `python -m unittest discover -s tests` before opening a PR.
 
-By contributing you agree that your contributions are licensed under Apache-2.0.
+By contributing you agree that your contributions are licensed under the MIT License.

@@ -8,12 +8,12 @@ dynamic = ["version"]
 description = "Read-only IOC hunting & forensic triage with court-ready, hash-sealed reports and human-approved remediation"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = { text = "MIT" }
 authors = [{ name = "sneh1309" }]
 keywords = ["dfir", "forensics", "incident-response", "ioc", "threat-hunting", "mitre-attack", "yara", "chain-of-custody"]
 classifiers = [
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: Apache Software License",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
   "Operating System :: MacOS",

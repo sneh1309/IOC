@@ -155,4 +155,4 @@ Or use the slash commands `/aletheia-scan`, `/aletheia-plan`, `/aletheia-verify`
 
 ## License
 
-[Apache-2.0](LICENSE). Free for commercial and non-commercial use. Third-party tools it can call are licensed separately.
+[MIT](LICENSE). Free for commercial and non-commercial use. Third-party tools it can call are licensed separately.
