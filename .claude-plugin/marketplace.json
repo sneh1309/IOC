@@ -1,0 +1,17 @@
+{
+  "name": "aletheia",
+  "owner": { "name": "sneh1309" },
+  "metadata": {
+    "description": "Aletheia DFIR toolkit for Claude Code",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "aletheia",
+      "source": "./",
+      "description": "Read-only IOC hunting & forensic triage with court-ready reports and human-approved remediation.",
+      "version": "1.0.0",
+      "category": "security"
+    }
+  ]
+}

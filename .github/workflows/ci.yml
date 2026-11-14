@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Lint (errors only)
+        run: |
+          python -m pip install ruff
+          ruff check aletheia tests --select E9,F
+      - name: Unit & integration tests
+        run: python -m unittest discover -s tests -v
+      - name: Smoke test - real read-only scan of the runner + integrity verification
+        shell: bash
+        run: |
+          python run_aletheia.py scan --examiner "CI" --case-id CI-${{ github.run_id }} --profile quick \
+            --output ci_cases --no-prompt --json > summary.json
+          cat summary.json
+          python run_aletheia.py verify "$(python -c "import json;print(json.load(open('summary.json'))['case_dir'])")"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sample-report-${{ matrix.os }}-py${{ matrix.python }}
+          path: ci_cases/
+          retention-days: 7
+
+  yara:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install yara-python
+      - name: Bundled YARA rules compile and EICAR is detected
+        run: |
+          python - <<'PY'
+          import glob, yara, tempfile, os
+          for f in glob.glob("aletheia/data/yara/*.yar"):
+              yara.compile(filepath=f)
+          d = tempfile.mkdtemp(); p = os.path.join(d, "eicar.com")
+          open(p, "wb").write(b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*")
+          r = yara.compile(filepath="aletheia/data/yara/aletheia_core.yar")
+          assert any(m.rule == "ALETHEIA_EICAR_Test_File" for m in r.match(p)), "EICAR not detected"
+          print("YARA OK")
+          PY

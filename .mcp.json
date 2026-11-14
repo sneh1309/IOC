@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aletheia": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/run_aletheia.py", "mcp"]
+    }
+  }
+}

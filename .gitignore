@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+# case output must never be committed: it contains evidence from examined machines
+aletheia_cases/
+*_cases/
+.ruff_cache/
