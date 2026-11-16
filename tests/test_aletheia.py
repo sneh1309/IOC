@@ -344,5 +344,68 @@ class TestEndToEnd(TmpCase):
         self.assertEqual(open(os.path.join(target, "eicar.com"), "rb").read(), EICAR)
 
 
+class TestMacInvestigationOffline(TmpCase):
+    """Runs the macOS module against a synthetic Mac volume and proves nothing was modified."""
+
+    def _hashes(self, root):
+        import hashlib
+
+        out = {}
+        for dp, _d, fs in os.walk(root):
+            for f in fs:
+                p = os.path.join(dp, f)
+                out[os.path.relpath(p, root)] = (hashlib.sha256(open(p, "rb").read()).hexdigest(), os.stat(p).st_mtime_ns)
+        return out
+
+    def test_offline_mac_volume(self):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mac_fixture
+        from aletheia.core.context import CaseInfo
+        from aletheia.scan import run_scan
+
+        vol = os.path.join(self.tmp, "MacHD")
+        info = mac_fixture.build(vol)
+        before = self._hashes(vol)
+        res = run_scan(CaseInfo(case_id="MAC-1", examiner="CI"), os.path.join(self.tmp, "out"), profile="quick",
+                       log=lambda *a, **k: None,
+                       options={"mac_investigation": True, "mac_root": vol, "watch": [info["watched"]], "days": 3650})
+        after = self._hashes(vol)
+        self.assertEqual(before, after, "evidence volume was modified (content, mtime or new -wal/-shm files)")
+        case = res["summary"]["case_dir"]
+        self.assertTrue(engine.verify_case(case)["ok"])
+        self.assertFalse(os.path.exists(os.path.join(case, "_work")), "working copies must be removed before sealing")
+        data = json.load(open(os.path.join(case, "report", "report.json")))
+        qs = {q["id"]: q for q in data["investigation"]["questions"]}
+        self.assertEqual(set(qs), {f"Q{i}" for i in range(1, 10)})
+        t = qs["Q1"]["tables"]
+        self.assertEqual(t["Mail sent/forwarded to watched addresses"]["total"], 2)
+        self.assertEqual(t["Mail rules that forward/redirect"]["total"], 1)
+        self.assertEqual(t["Visits to webmail forwarding/rules pages"]["total"], 1)
+        self.assertEqual(qs["Q8"]["tables"]["Deleted / Trash e-mails"]["total"], 1)
+        self.assertEqual(qs["Q8"]["tables"]["Forwarded e-mails"]["total"], 2)
+        self.assertGreaterEqual(qs["Q2"]["tables"]["Messages involving watched keywords"]["total"], 1)
+        self.assertEqual(qs["Q5"]["tables"]["Known Wi-Fi networks"]["total"], 2)
+        self.assertEqual(qs["Q5"]["tables"]["IP address leases (DHCP)"]["rows"][0][2], "192.168.50.23")
+        self.assertGreaterEqual(qs["Q3"]["tables"]["Downloads"]["total"], 2)
+        rules_hit = {f["rule_id"] for f in data["findings"]}
+        for r in ("MAC-001", "MAC-002", "MAC-005", "MAC-006"):
+            self.assertIn(r, rules_hit)
+        # Apple's own app with Accessibility must not be flagged
+        self.assertFalse(any("com.apple.Terminal" in f["title"] for f in data["findings"]))
+        # message text is NOT collected by default
+        self.assertNotIn("sent you the file", json.dumps(data))
+        self.assertTrue(os.path.isdir(os.path.join(case, "report", "investigation")))
+
+    def test_runner_blocks_mac_state_changes(self):
+        r = SafeRunner()
+        for argv in (["log", "erase", "--all"], ["log", "collect"], ["pmset", "-a", "sleep", "0"],
+                     ["profiles", "remove", "-all"], ["profiles", "-D"], ["sfltool", "resetbtm"],
+                     ["systemsetup", "-setremotelogin", "off"], ["systemextensionsctl", "uninstall", "x", "y"],
+                     ["launchctl", "kickstart", "-k", "system/x"], ["fdesetup", "disable"], ["csrutil", "disable"],
+                     ["tmutil", "delete", "/x"]):
+            with self.assertRaises(CommandRefused, msg=argv):
+                r.run(argv)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

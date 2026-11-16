@@ -846,6 +846,146 @@ def posture(a, db):
     return out
 
 
+# ==================================================================== macOS
+def _inv(a):
+    return a.get("mac_investigation") or {}
+
+
+@rule("MAC-001", "Remote-access, monitoring or stalkerware software present", "macos")
+def mac_spy(a, db):
+    s = _inv(a).get("system", {})
+    hits = (s.get("software") or {}).get("remote_or_monitoring_software", []) + \
+        (s.get("remote") or {}).get("remote_or_monitoring_hits", [])
+    out = []
+    for h in hits:
+        cat = h.get("category", "")
+        label = h.get("app") or h.get("name") or h.get("source")
+        sev = "critical" if cat in ("stalkerware", "keylogger") else "high"
+        out.append(finding("MAC-001", f"{cat.title()} software '{h.get('match')}' found ({label})", sev,
+                           ["T1219"] if "remote" in cat else ["T1056.001", "T1113"],
+                           f"A {cat} product was found on this Mac. Such software can let another person watch the "
+                           "screen, read messages/keystrokes or control the computer. Confirm whether the owner "
+                           "installed it.",
+                           [_ev("mac_investigation", h.get("path") or h.get("source") or "software", str(label),
+                                added=h.get("added") or h.get("date"))],
+                           "Ask the owner whether they installed it; if not, preserve evidence then uninstall and "
+                           "change all passwords from a different, trusted device.",
+                           [{"type": "manual", "text": f"Remove {label} (System Settings > General > Login Items, "
+                             "Applications folder, Privacy & Security permissions)"}],
+                           confidence="medium", category="macos", when=None))
+    return out
+
+
+@rule("MAC-002", "Non-Apple app holds keystroke / screen / control / full-disk permission", "macos")
+def mac_tcc(a, db):
+    inv = _inv(a)
+    rows = list((inv.get("system") or {}).get("tcc") or [])
+    for u, d in (inv.get("users") or {}).items():
+        rows += (d.get("accounts") or {}).get("tcc", [])
+    sev_map = {"kTCCServiceListenEvent": "high", "kTCCServiceScreenCapture": "high", "kTCCServiceAccessibility": "medium",
+               "kTCCServicePostEvent": "medium", "kTCCServiceSystemPolicyAllFiles": "medium"}
+    out = []
+    for r in rows:
+        if r.get("granted") and not r.get("apple") and r.get("service") in sev_map:
+            out.append(finding("MAC-002", f"{r.get('app')} has {r.get('permission')}", sev_map[r["service"]],
+                               ["T1056.001"] if r["service"] == "kTCCServiceListenEvent" else
+                               ["T1113"] if r["service"] == "kTCCServiceScreenCapture" else ["T1548"],
+                               "This permission lets the app capture keystrokes, see the screen, control the Mac or "
+                               "read all files. Legitimate for some tools (password managers, video calls, IT "
+                               "agents) - the owner must recognise it.",
+                               [_ev("mac_investigation", "TCC.db", r.get("app"), permission=r.get("permission"),
+                                    changed=r.get("changed"))],
+                               "If not recognised: System Settings > Privacy & Security > (permission) > remove the app.",
+                               [{"type": "manual", "text": f"Revoke {r.get('permission')} from {r.get('app')} in "
+                                 "System Settings > Privacy & Security"}], confidence="low", category="macos",
+                               when=r.get("changed")))
+    return out
+
+
+@rule("MAC-003", "Remote access services enabled", "macos")
+def mac_services(a, db):
+    svc = ((_inv(a).get("system") or {}).get("remote") or {}).get("services") or {}
+    out = []
+    for name, status in svc.items():
+        st = str(status)
+        if (st.startswith("On") or st == "Yes") and "File Sharing" not in name:
+            out.append(finding("MAC-003", f"{name} is ON", "high" if "Remote" in name or "Screen" in name else "medium",
+                               "T1021", "A built-in remote access service is enabled; anyone with valid credentials "
+                               "on the network can connect.",
+                               [_ev("mac_investigation", "sharing services", f"{name}: {st}")],
+                               "Turn it off in System Settings > General > Sharing unless the owner needs it.",
+                               [{"type": "manual", "text": f"Disable {name} in System Settings > General > Sharing"}],
+                               confidence="high", category="macos"))
+    return out
+
+
+@rule("MAC-004", "Remote session events in the unified log", "macos")
+def mac_remote_events(a, db):
+    ev = ((_inv(a).get("system") or {}).get("unified_logs") or {}).get("remote_access") or []
+    accepted = [e for e in ev if re.search(r"accepted|authenticat|connection from|client .* connected", e.get("message", ""), re.I)]
+    if not accepted:
+        return []
+    return [finding("MAC-004", f"{len(accepted)} remote session/authentication event(s) (Screen Sharing/SSH/ARD)",
+                    "high", ["T1021.004", "T1021.005"], "The log records remote sessions to this Mac. Compare the "
+                    "dates with times the owner was not using it.",
+                    [_ev("mac_investigation", "unified log", f"{e.get('date')} {e.get('process')}: {e.get('message')}")
+                     for e in accepted[:25]], "Validate each session; disable remote services; change passwords.",
+                    [], confidence="medium", category="macos", when=accepted[0].get("date"))]
+
+
+@rule("MAC-005", "Apple Mail rule forwards/redirects mail or mail sent to watched address", "macos")
+def mac_mail(a, db):
+    out = []
+    for u, d in (_inv(a).get("users") or {}).items():
+        m = d.get("mail") or {}
+        for r in m.get("rules", []):
+            if r.get("forwards_or_redirects") or r.get("watched_hits"):
+                out.append(finding("MAC-005", f"Mail rule '{r.get('name')}' forwards/redirects ({', '.join(r.get('addresses') or [])})",
+                                   "high", "T1114.003", "An Apple Mail rule automatically forwards or redirects mail.",
+                                   [_ev("mac_investigation", r.get("file"), r.get("raw", "")[:600],
+                                        modified=r.get("file_modified"))],
+                                   "Screenshot and then remove the rule (Mail > Settings > Rules).",
+                                   [{"type": "manual", "text": "Remove forwarding rule in Mail > Settings > Rules"}],
+                                   confidence="high", category="macos", when=r.get("file_modified")))
+        sent = [x for x in m.get("watched", []) if str(x.get("direction", "")).startswith("sent")]
+        if sent:
+            out.append(finding("MAC-006", f"{len(sent)} e-mail(s) sent/forwarded to watched address(es) by user {u} "
+                               f"(first {sent[0].get('date')}, last {sent[-1].get('date')})", "high", "T1114.003",
+                               "Messages addressed to a watched recipient were found in Apple Mail.",
+                               [_ev("mac_investigation", "Mail Envelope Index", f"{x.get('date')} -> {x.get('to')}: {x.get('subject')}")
+                                for x in sent[:25]], "Review the listed messages (Q1/Q8).", [],
+                               confidence="high", category="macos", when=sent[0].get("date")))
+    return out
+
+
+@rule("MAC-007", "Log erase / clock change / privacy reset events", "macos")
+def mac_tamper(a, db):
+    ev = ((_inv(a).get("system") or {}).get("unified_logs") or {}).get("tamper_indicators") or []
+    if not ev:
+        return []
+    return [finding("MAC-007", f"{len(ev)} possible anti-forensic event(s) (log erase / time change / tccutil)", "high",
+                    ["T1070", "T1070.006"], "Events consistent with erasing logs, changing the system clock or "
+                    "resetting privacy permissions were recorded.",
+                    [_ev("mac_investigation", "unified log", f"{e.get('date')} {e.get('process')}: {e.get('message')}")
+                     for e in ev[:25]], "Determine who performed these actions and when.", [],
+                    confidence="medium", category="macos", when=ev[0].get("date"))]
+
+
+@rule("MAC-008", "Configuration profile or MDM enrolment present", "macos")
+def mac_profiles(a, db):
+    rm = (_inv(a).get("system") or {}).get("remote") or {}
+    if not (rm.get("profiles_installed") or rm.get("mdm_enrolled")):
+        return []
+    return [finding("MAC-008", "Configuration profile(s)" + (" and MDM enrolment" if rm.get("mdm_enrolled") else "")
+                    + " installed", "medium", "T1072", "Profiles/MDM can install software, route traffic through a "
+                    "proxy/VPN or install certificates that allow traffic interception. Normal on company Macs; "
+                    "suspicious on a personal Mac.",
+                    [_ev("mac_investigation", "profiles", (rm.get("profiles_raw") or "")[:1500])],
+                    "Confirm who installed them (System Settings > General > Device Management).",
+                    [{"type": "manual", "text": "Review/remove unknown profiles in System Settings > General > "
+                      "Device Management"}], confidence="medium", category="macos")]
+
+
 # =================================================================== RUNNER
 def run_all(artifacts: dict, db, log=None) -> list:
     findings = []

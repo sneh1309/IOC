@@ -30,7 +30,7 @@ jobs:
       - name: Smoke test - real read-only scan of the runner + integrity verification
         shell: bash
         run: |
-          python run_aletheia.py scan --examiner "CI" --case-id CI-${{ github.run_id }} --profile quick \
+          python run_aletheia.py scan --examiner "CI" --case-id CI-${{ github.run_id }} --profile quick --days 2 \
             --output ci_cases --no-prompt --json > summary.json
           cat summary.json
           python run_aletheia.py verify "$(python -c "import json;print(json.load(open('summary.json'))['case_dir'])")"

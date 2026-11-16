@@ -11,7 +11,8 @@ import tempfile
 from datetime import datetime, timezone
 
 from aletheia import __version__
-from aletheia.collectors import accounts, filesystem, logs, network, persistence, processes, software, system
+from aletheia.collectors import (accounts, filesystem, logs, macos_forensics, network, persistence, processes, software,
+                                 system)
 from aletheia.core.audit import AuditLog
 from aletheia.core.context import CaseInfo, ScanContext
 from aletheia.core.evidence import EvidenceStore, safe_name
@@ -38,7 +39,7 @@ COLLECTION_ORDER = [
 
 def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None, iocs=None, yara=None,
              tools=None, allow_tool_footprint=False, pdf=False, sign_key=None, min_remediation_severity="medium",
-             log=print) -> dict:
+             log=print, options=None) -> dict:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     case_dir = os.path.abspath(os.path.join(output, f"{safe_name(case.case_id)}_{stamp}"))
     os.makedirs(case_dir, exist_ok=False)
@@ -47,7 +48,8 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
     runner = SafeRunner(audit=audit, store=store)
     ctx = ScanContext(case=case, case_dir=case_dir, profile=profile, extra_paths=list(paths or []),
                       ioc_sources=list(iocs or []), yara_sources=list(yara or []), external_tools=list(tools or []),
-                      allow_tool_footprint=allow_tool_footprint, audit=audit, store=store, runner=runner, log=log)
+                      allow_tool_footprint=allow_tool_footprint, audit=audit, store=store, runner=runner, log=log,
+                      options=dict(options or {}))
     started = utc_now()
     fp = builder.tool_fingerprint()
     audit.record("case_opened", {"case": case.__dict__, "argv": sys.argv, "profile": profile, "case_dir": case_dir,
@@ -58,7 +60,19 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
                     subdir=".")
     _warn_output_location(ctx, log)
 
-    for name, fn, desc in COLLECTION_ORDER:
+    mac_root = ctx.options.get("mac_root")
+    offline = bool(mac_root) and os.path.abspath(mac_root) != os.path.abspath(os.sep)
+    order = COLLECTION_ORDER
+    if offline:
+        # The evidence is a mounted volume: never examine the host this tool happens to run on.
+        log(f"[*] OFFLINE mode - examining mounted volume {mac_root} only (no live collection on this computer)")
+        audit.record("offline_mode", {"evidence_root": os.path.abspath(mac_root)})
+        ctx.extra_paths = macos_forensics.offline_targets(mac_root) + ctx.extra_paths
+        ctx.options["offline"] = True
+        order = [("offline_source", macos_forensics.offline_source, "evidence volume identity"),
+                 ("persistence", macos_forensics.offline_persistence, "launch agents/daemons on the volume"),
+                 ("filesystem", filesystem.collect, "file-system triage of the volume")]
+    for name, fn, desc in order:
         log(f"[*] Collecting {desc} ...")
         audit.record("collector_start", {"collector": name})
         try:
@@ -66,6 +80,16 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
         except Exception as exc:
             ctx.error(f"collector:{name}", exc)
             log(f"    [!] {name}: {exc}")
+
+    if ctx.options.get("mac_investigation"):
+        log("[*] macOS investigation (mail, messages, usage, networks, spyware, remote access) ...")
+        audit.record("collector_start", {"collector": "macos_investigation", "options": {
+            k: v for k, v in ctx.options.items() if k != "watch"}, "watch_terms": len(ctx.options.get("watch") or [])})
+        try:
+            macos_forensics.collect(ctx)
+        except Exception as exc:
+            ctx.error("collector:macos_investigation", exc)
+            log(f"    [!] macOS investigation: {exc}")
 
     log("[*] Loading threat intelligence (IOC feeds) ...")
     db = ioc_mod.load_database(ctx.ioc_sources)
@@ -98,6 +122,8 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
     store.save_text("timeline", builder.timeline_csv(tl), subdir=rd, ext=".csv")
     store.save_text("iocs_stix21", json.dumps(builder.stix_bundle(ctx), indent=2), subdir=rd, ext=".json")
     store.save_text("remediation_plan", json.dumps(plan, indent=2, default=str), subdir=rd, ext=".json")
+    for name, csv_text in builder.investigation_csvs(ctx).items():
+        store.save_text(name, csv_text, subdir=os.path.join(rd, "investigation"), ext=".csv")
     html_path = os.path.join(case_dir, html_rec["path"])
     pdf_path = _pdf(html_path, log) if pdf else None
     if pdf_path:

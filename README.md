@@ -35,6 +35,7 @@ Aletheia examines a live Windows, Linux or macOS device for indicators of compro
 | **Open-source integrations** | ClamAV, chkrootkit, rkhunter, Lynis, osquery, Hayabusa, Chainsaw (Sigma), Sysinternals Autoruns and Mandiant capa, all optional. Each tool's footprint on the system is documented, and tools that write to the system are refused unless you allow them. |
 | **Human-approved remediation** | Kill process (PID-reuse safe), quarantine (hash-verified, restorable), disable cron / systemd / launchd / service / scheduled task / Run-key, comment out hijacked lines, block IPs, lock accounts. Every action is labelled with **MITRE D3FEND**. |
 | **Zero dependencies** | Pure Python standard library (3.9+), so there is nothing to install on a suspect machine. Runs from a USB stick: `python run_aletheia.py scan ...` |
+| **macOS investigation** | Answers the questions people actually ask: when email forwarding started, what apps and Messages were used and when, daily usage times, which Wi-Fi networks and IPs the Mac was on, hidden spyware and remote access, forwarded or deleted emails, and log tampering. Every database is copied byte-for-byte first and only the copy is read. Works live or offline against a mounted Mac volume. |
 | **Works with Claude** | A Claude Code plugin (skill + slash commands) and an MCP server. You ask in plain English, and Claude runs the analysis and explains it. Remediation always stays in human hands. |
 
 ## What it examines
@@ -139,6 +140,7 @@ Or use the slash commands `/aletheia-scan`, `/aletheia-plan`, `/aletheia-verify`
 
 ## Documentation
 
+* **[Mac step-by-step user guide](docs/MAC_USER_GUIDE.md)**: read-only Mac investigation (email forwarding, Messages/app usage, usage times, networks, spyware, remote access, deleted emails)
 * [Methodology & standards](docs/METHODOLOGY.md): ISO/IEC 27037/27041-27043, NIST SP 800-86 / 800-61r3 / CSF 2.0, RFC 3227, ACPO, SWGDE, MITRE ATT&CK / D3FEND, CIS v8
 * [Court & evidence handling](docs/COURT_EVIDENCE.md): admissibility notes (Canada, US, UK), examiner checklist
 * [Remediation safety model](docs/REMEDIATION.md)

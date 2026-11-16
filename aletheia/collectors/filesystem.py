@@ -48,7 +48,8 @@ TEMP_MARKERS = ("/tmp", "/var/tmp", "/dev/shm", "\\temp", "\\appdata\\local\\tem
 
 def collect(ctx) -> None:
     lim = ctx.limits
-    targets = default_targets(ctx.profile) + [p for p in ctx.extra_paths if os.path.exists(p)]
+    extra = [p for p in ctx.extra_paths if os.path.exists(p)]
+    targets = extra if ctx.options.get("offline") else default_targets(ctx.profile) + extra
     files, truncated = [], False
     for root in targets:
         if len(files) >= lim["max_files"]:
