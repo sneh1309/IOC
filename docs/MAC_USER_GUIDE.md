@@ -95,12 +95,14 @@ macOS hides Mail, Messages, Safari and privacy settings from all programs unless
    | Organization | `Bercell Integrated Technologies` |
    | Evidence item | `MacBook Air 13" M2, S/N C02XXXXXXX` |
    | **Watch for** | the suspect email address(es), names or phone numbers, comma-separated |
-   | Days back to search logs | `90` (Enter). Use `365` if the problem is older; it takes longer. |
+   | **From date** | The first day you care about, e.g. `2026-10-01`. **Recommended: a date range is much faster** (minutes instead of up to 40). Press Enter to skip and use "last N days". |
+| **To date** | The last day, e.g. `2026-11-15` (Enter = today). Both dates are included. |
+| Days back (only if no From date) | `90` (Enter). Use `365` if the problem is older; it takes longer. |
    | Collect message TEXT? | **N** (default: only dates/contacts). Choose Y only if the owner consented and the case requires it. |
    | Save results to | press Enter (saves to the USB stick) |
 
 4. When asked for a **password**, type the Mac's administrator password. The characters are invisible; press Return. It's needed only to *read* protected system logs.
-5. **Wait** (10–40 minutes) and don't use the Mac. Progress is shown on screen.
+5. **Wait** (a few minutes with a short date range, up to 10–40 minutes for 90+ days) and don't use the Mac. Progress is shown on screen.
 6. When finished, the screen shows the **result folder** and a **Manifest SHA-256**. **Write the SHA-256 in your notes.** It proves later that nothing in the results was changed.
 
 > Don't open the report on the client's Mac. A browser would create new history entries on it.
@@ -167,7 +169,7 @@ For Gmail: Settings → *Forwarding and POP/IMAP* and *Filters*; Google Account 
 | `Terminal does NOT have Full Disk Access` | Step 3, then quit Terminal with ⌘Q and reopen it. |
 | Report says *permission denied* in "Collection access problems" | Same as above: Full Disk Access was not active. Re-run. |
 | Q2 app usage is empty | Normal on macOS 14+ (Apple moved app usage to a new format). Use Q4 activity, browser and Messages tables instead. |
-| It seems stuck at "unified log" | Reading the system log can take several minutes per query. Wait, or re-run with fewer days. |
+| It seems stuck at "unified log" | Reading the system log can take several minutes per query. Wait, or re-run with a shorter From/To date range. |
 
 ---
 
@@ -182,3 +184,11 @@ Running anything on a live computer leaves unavoidable traces. Aletheia keeps th
 
 For the highest standard (e.g. criminal matters), a full forensic image of the disk should be taken by a specialist. Aletheia can also analyse a **mounted Mac volume or image offline** without running anything on the Mac:
 `python3 run_aletheia.py scan --mac-root "/Volumes/Macintosh HD" --watch <terms> --examiner "<name>" --output <folder>`
+
+---
+
+## About the date range
+
+* **Filtered to the range:** everything that has a date. That covers emails sent/forwarded/deleted, Messages, attachments, web history, downloads, app usage, wake/sleep, unlocks, USB/AirDrop, remote-session and tamper log events, and files created or modified.
+* **Always shown, whatever the range:** the Mac's *current* state. That covers installed apps and spyware, privacy permissions, Mail forwarding rules, sharing/remote settings, profiles, and remembered Wi-Fi networks (with their dates). Spyware installed before your range can still be spying during it.
+* Command line equivalent: `--from 2026-10-01 --to 2026-11-15`.

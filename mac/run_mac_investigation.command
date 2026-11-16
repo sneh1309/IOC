@@ -86,9 +86,30 @@ echo
 echo "  Watch list: e-mail addresses, names or phone numbers to search for in"
 echo "  Mail, Messages and browser history. Separate several with commas."
 read -r -p "  Watch for                     : " WATCH
-read -r -p "  How many days back to search logs [90]: " DAYS
-DAYS="${DAYS:-90}"
-case "$DAYS" in ''|*[!0-9]*) DAYS=90 ;; esac
+echo
+echo "  DATE RANGE - examining only the dates you care about is MUCH faster."
+echo "  Use the format YYYY-MM-DD (e.g. 2026-10-01). Dates are this Mac's local dates."
+valid_date() { [[ "$1" =~ ^20[0-9]{2}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$ ]]; }
+while true; do
+  read -r -p "  From date (Enter = no range, use 'last N days' instead): " FROM_DATE
+  [ -z "$FROM_DATE" ] || valid_date "$FROM_DATE" && break
+  warn "Please type the date as YYYY-MM-DD"
+done
+TO_DATE=""
+DAYS=90
+if [ -n "$FROM_DATE" ]; then
+  while true; do
+    read -r -p "  To date   (Enter = today): " TO_DATE
+    if [ -z "$TO_DATE" ]; then break; fi
+    if ! valid_date "$TO_DATE"; then warn "Please type the date as YYYY-MM-DD"; continue; fi
+    if [[ "$TO_DATE" < "$FROM_DATE" ]]; then warn "'To' date is before 'From' date"; continue; fi
+    break
+  done
+else
+  read -r -p "  How many days back to search [90]: " DAYS
+  DAYS="${DAYS:-90}"
+  case "$DAYS" in ''|*[!0-9]*) DAYS=90 ;; esac
+fi
 read -r -p "  Collect message TEXT too? (default: dates/contacts only) [y/N]: " CONTENT
 DEFAULT_OUT="$ROOT/cases"
 read -r -p "  Save results to [$DEFAULT_OUT]: " OUT
@@ -102,11 +123,18 @@ ARGS=(scan --examiner "$EXAMINER" --profile standard --days "$DAYS" --output "$O
 [ -n "$ORG" ]    && ARGS+=(--org "$ORG")
 [ -n "$ITEM" ]   && ARGS+=(--evidence-item "$ITEM")
 [ -n "$WATCH" ]  && ARGS+=(--watch "$WATCH")
+[ -n "$FROM_DATE" ] && ARGS+=(--from "$FROM_DATE")
+[ -n "$TO_DATE" ]   && ARGS+=(--to "$TO_DATE")
 case "$CONTENT" in y|Y) ARGS+=(--include-content) ;; esac
 
 echo
 bold "Ready. Please do not use this Mac (and keep it on power) until finished."
-echo "  Typical duration: 10-40 minutes (most time is reading the system log)."
+if [ -n "$FROM_DATE" ]; then
+  echo "  Examining: $FROM_DATE to ${TO_DATE:-today}"
+  echo "  Typical duration: a few minutes for a short date range."
+else
+  echo "  Examining: last $DAYS days.  Typical duration: 10-40 minutes (mostly reading the system log)."
+fi
 echo "  You will now be asked for this Mac's administrator password (needed to READ"
 echo "  system-protected logs). Nothing is changed with it."
 echo

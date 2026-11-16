@@ -11,8 +11,9 @@ ALETHEIA - READ-ONLY MAC INVESTIGATION KIT
 2. AT THE CLIENT'S MAC (with the owner's written permission)
    - System Settings > Privacy & Security > Full Disk Access > turn ON "Terminal".
    - Open Terminal, type:  bash /Volumes/EVIDENCE/aletheia/mac/run_mac_investigation.command
-   - Answer the questions (put the suspect e-mail address at "Watch for").
-   - Wait 10-40 min. Write down the "Manifest SHA-256". Quit Terminal, eject the USB.
+   - Answer the questions (suspect e-mail at "Watch for"; enter a From/To date
+     range to make it quick).
+   - Wait (minutes for a short range). Write down the "Manifest SHA-256". Quit Terminal, eject the USB.
 
 3. ON YOUR COMPUTER
    - Open aletheia/cases/<case>/report/report.html  ->  section 1A answers Q1-Q9.

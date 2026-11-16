@@ -46,7 +46,18 @@ def cmd_scan(args) -> int:
 
     options = {"mac_investigation": bool(args.mac_root) or (IS_MACOS and not args.no_mac_investigation),
                "mac_root": args.mac_root, "watch": [w for item in (args.watch or []) for w in item.split(",")],
-               "days": args.days, "include_content": args.include_content}
+               "days": args.days, "include_content": args.include_content,
+               "date_from": args.date_from, "date_to": args.date_to}
+    for flag, val in (("--from", args.date_from), ("--to", args.date_to)):
+        if val:
+            try:
+                datetime.strptime(val, "%Y-%m-%d")
+            except ValueError:
+                log(f"error: {flag} must be a date like 2026-11-01 (got {val!r})")
+                return 2
+    if args.date_from and args.date_to and args.date_from > args.date_to:
+        log("error: --from date is after --to date")
+        return 2
     res = run_scan(case, args.output, profile=args.profile, paths=args.path, iocs=args.ioc, yara=args.yara,
                    tools=args.with_tools, allow_tool_footprint=args.allow_tool_footprint, pdf=args.pdf,
                    sign_key=args.sign, min_remediation_severity=args.remediation_min_severity, log=log,
@@ -237,7 +248,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="append", metavar="TERM",
                    help="e-mail address / name / phone / keyword to look for in mail, messages, browser history "
                         "(repeatable or comma-separated)")
-    s.add_argument("--days", type=int, default=90, help="how far back to search system logs (default 90)")
+    s.add_argument("--days", type=int, default=90,
+                   help="how far back to search (default 90) - ignored when --from/--to are given")
+    s.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD",
+                   help="only examine activity ON or AFTER this date (Mac's local time) - much faster")
+    s.add_argument("--to", dest="date_to", metavar="YYYY-MM-DD",
+                   help="only examine activity ON or BEFORE this date (inclusive; default: today)")
     s.add_argument("--include-content", action="store_true",
                    help="also collect message text (default: metadata only, for privacy)")
     s.add_argument("--no-mac-investigation", action="store_true", help="skip the macOS investigation module")

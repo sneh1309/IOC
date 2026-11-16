@@ -141,6 +141,14 @@ def parse_local(ts: str, offset: str) -> Optional[float]:
         return None
 
 
+def parse_day(text: str, end_of_day: bool = False) -> _dt.datetime:
+    """'YYYY-MM-DD' (local time of the examined Mac) -> aware datetime at 00:00:00 or 23:59:59."""
+    d = _dt.datetime.strptime(text.strip(), "%Y-%m-%d")
+    if end_of_day:
+        d = d.replace(hour=23, minute=59, second=59)
+    return d.astimezone()
+
+
 def read_plist(path: str):
     try:
         with open_readonly(path) as fh:
@@ -174,18 +182,37 @@ def matches(text, watch: list) -> list:
 
 
 class Investigator:
-    def __init__(self, ctx, root: str = "/", days: int = 90, watch=None, include_content: bool = False):
+    def __init__(self, ctx, root: str = "/", days: int = 90, watch=None, include_content: bool = False,
+                 date_from: Optional[str] = None, date_to: Optional[str] = None):
         self.ctx = ctx
         self.root = root
         self.live = os.path.abspath(root) == "/"
         self.days = days
-        self.since = _dt.datetime.now().timestamp() - days * 86400
+        # Time window: an explicit --from/--to date range (local dates, inclusive) or the last N days.
+        self.explicit_range = bool(date_from or date_to)
+        now = _dt.datetime.now().astimezone()
+        end = parse_day(date_to, end_of_day=True) if date_to else now
+        start = parse_day(date_from) if date_from else end - _dt.timedelta(days=days)
+        if start > end:
+            raise ValueError(f"--from {date_from} is after --to {date_to}")
+        self.start_dt, self.end_dt = start, end
+        self.since, self.until = start.timestamp(), end.timestamp()
         self.watch = [w.strip().lower() for w in (watch or []) if w and w.strip()]
         self.include_content = include_content
         self.work = os.path.join(ctx.case_dir, "_work")
         self.inv: dict = {"generated_utc": utc_now(), "mode": "live" if self.live else f"offline ({root})",
-                          "days": days, "watch": self.watch, "include_content": include_content,
+                          "days": days, "watch": self.watch,
+                          "range": {"from": start.strftime("%Y-%m-%d %H:%M:%S %z"), "to": end.strftime("%Y-%m-%d %H:%M:%S %z"),
+                                    "explicit": self.explicit_range,
+                                    "label": (f"{start:%Y-%m-%d} to {end:%Y-%m-%d}" if self.explicit_range
+                                              else f"last {days} days ({start:%Y-%m-%d} to {end:%Y-%m-%d})")}, "include_content": include_content,
                           "access_problems": [], "databases": [], "users": {}, "system": {}}
+
+    def keep(self, ts) -> bool:
+        """True if a timestamp falls inside the selected window (undated records are kept unless a range was set)."""
+        if not ts:
+            return not self.explicit_range
+        return self.since <= ts <= self.until
 
     # ---------------------------------------------------------- path utils
     def p(self, *parts) -> str:
@@ -311,6 +338,8 @@ class Investigator:
             subj = f"{r.get('prefix') or ''}{r.get('subject') or ''}"
             box = r.get("mailbox") or ""
             when = unix_time(r.get("date_sent")) or unix_time(r.get("date_received"))
+            if not self.keep(when):
+                continue
             item = {"date": fmt(when), "_ts": when, "from": r.get("sender"), "to": ", ".join(to), "subject": subj,
                     "mailbox": box.split("/")[-1] if box else "", "mailbox_url": box}
             hits = matches(" ".join(to + [r.get("sender") or ""]), self.watch)
@@ -347,10 +376,11 @@ class Investigator:
                                a.is_outgoing, maj.message_id FROM attachment a
                                LEFT JOIN message_attachment_join maj ON maj.attachment_id = a.ROWID""")
         conn.close()
-        out["total"] = len(rows)
         contacts, days = {}, {}
         for r in rows:
             t = mac_time(r.get("date"))
+            if not self.keep(t):
+                continue
             r["_ts"] = t
             h = r.get("handle") or "(unknown / group)"
             c = contacts.setdefault(h, {"contact": h, "messages": 0, "sent": 0, "received": 0, "first": t, "last": t,
@@ -369,11 +399,14 @@ class Investigator:
                                        "direction": "sent" if r.get("is_from_me") else "received",
                                        "service": r.get("service"), "text": r.get("text") if self.include_content else
                                        "(content not collected - use --include-content)"})
+        out["total"] = sum(c["messages"] for c in contacts.values())
         out["by_contact"] = sorted(({**c, "first": fmt(c["first"]), "last": fmt(c["last"])} for c in contacts.values()),
                                    key=lambda x: -x["messages"])
         out["by_day"] = sorted(days.values(), key=lambda x: x["date"], reverse=True)
         for a in atts:
             t = mac_time(a.get("created_date"))
+            if not self.keep(t):
+                continue
             out["attachments"].append({"date": fmt(t), "_ts": t, "name": a.get("transfer_name") or
                                        os.path.basename(a.get("filename") or ""), "type": a.get("mime_type"),
                                        "bytes": a.get("total_bytes"),
@@ -411,6 +444,8 @@ class Investigator:
                 conv = chrome_time
                 for d in self.q(conn, "SELECT start_time, target_path, tab_url, total_bytes FROM downloads"):
                     t = chrome_time(d.get("start_time"))
+                    if not self.keep(t):
+                        continue
                     out["downloads"].append({"date": fmt(t), "_ts": t, "browser": label, "file": d.get("target_path"),
                                              "from": d.get("tab_url"), "bytes": d.get("total_bytes")})
             else:
@@ -421,6 +456,8 @@ class Investigator:
             ts = []
             for r in rows:
                 t = conv(r.get("t"))
+                if not self.keep(t):
+                    continue
                 ts.append(t or 0)
                 url = r.get("url") or ""
                 item = {"date": fmt(t), "_ts": t, "browser": label, "url": url[:500], "title": (r.get("title") or "")[:200]}
@@ -433,7 +470,7 @@ class Investigator:
                 if any(k.replace(" ", "") in low.replace("-", "") for k in REMOTE_SPY if len(k) > 4):
                     out["remote_spy_visits"].append(item)
             nz = [t for t in ts if t]
-            out["summary"].append({"browser": label, "visits": len(rows), "first": fmt(min(nz)) if nz else None,
+            out["summary"].append({"browser": label, "visits": len(ts), "first": fmt(min(nz)) if nz else None,
                                    "last": fmt(max(nz)) if nz else None})
         for k in ("history", "downloads", "mail_settings_visits", "watched", "remote_spy_visits"):
             out[k].sort(key=lambda x: x.get("_ts") or 0, reverse=True)
@@ -449,7 +486,7 @@ class Investigator:
                             "LSQuarantineOriginURLString origin, LSQuarantineSenderName sender FROM LSQuarantineEvent")
         conn.close()
         out = [{"date": fmt(mac_time(r["t"])), "_ts": mac_time(r["t"]), "app": r.get("agent"), "url": r.get("url"),
-                "origin": r.get("origin"), "sender": r.get("sender")} for r in rows]
+                "origin": r.get("origin"), "sender": r.get("sender")} for r in rows if self.keep(mac_time(r["t"]))]
         return sorted(out, key=lambda x: x.get("_ts") or 0, reverse=True)
 
     def knowledge(self, path: str, label: str) -> dict:
@@ -465,6 +502,8 @@ class Investigator:
         apps: dict = {}
         for r in rows:
             s, e = mac_time(r.get("s")), mac_time(r.get("e"))
+            if not self.keep(s):
+                continue
             if r["stream"] in ("/app/usage", "/app/inFocus") and r.get("value"):
                 dur = max(0, (e or s or 0) - (s or 0))
                 out["app_usage"].append({"start": fmt(s), "end": fmt(e), "_ts": s, "app": r["value"],
@@ -500,7 +539,7 @@ class Investigator:
                         b = getattr(os.lstat(fp), "st_birthtime", None)
                     except OSError:
                         continue
-                    if max(m, b or 0) >= self.since:
+                    if self.since <= max(m, b or 0) <= self.until:
                         out.append({"path": fp, "modified": fmt(m), "created": fmt(b), "_ts": max(m, b or 0),
                                     "size": st.get("size")})
                 if len(out) > 20000:
@@ -682,6 +721,8 @@ class Investigator:
             if kind == "Notification" and "Display is turned" not in msg:
                 continue
             t = parse_local(m.group(1), m.group(2))
+            if not self.keep(t):
+                continue
             out["power_events"].append({"date": fmt(t), "_ts": t, "event": kind, "detail": msg[:200]})
         out["logins_raw"] = self.run(["last"], "last_logins", 120)
         for line in out["logins_raw"].splitlines():
@@ -697,9 +738,11 @@ class Investigator:
         if not self.live:
             return out
         for label, pred in UNIFIED_LOG_QUERIES.items():
-            self.ctx.log(f"    - unified log: {label} (last {self.days} days) ...")
-            txt = self.run(["log", "show", "--style", "syslog", "--info", "--last", f"{self.days}d",
-                            "--predicate", pred], f"unifiedlog_{label}", 1800)
+            self.ctx.log(f"    - unified log: {label} ({self.inv['range']['label']}) ...")
+            window = ["--start", self.start_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                      "--end", self.end_dt.strftime("%Y-%m-%d %H:%M:%S")]
+            txt = self.run(["log", "show", "--style", "syslog", "--info"] + window +
+                           ["--predicate", pred], f"unifiedlog_{label}", 1800)
             events = []
             for line in txt.splitlines():
                 m = SYSLOG_LINE.match(line)
@@ -824,7 +867,7 @@ def build_questions(inv: dict) -> list:
     rf = all_u(["recent_files"])
     ul = s.get("unified_logs", {})
     a = [f"{len(dl)} downloaded file record(s), {len(att)} Messages attachment(s), {len(rf)} user file(s) created or "
-         f"modified in the last {inv.get('days')} days, {len(ul.get('usb_and_disks', []))} USB/disk mount event(s), "
+         f"modified in the period {(inv.get('range') or {}).get('label')}, {len(ul.get('usb_and_disks', []))} USB/disk mount event(s), "
          f"{len(ul.get('airdrop', []))} AirDrop event(s).",
          f"Forwarded e-mails in Mail: {sum(len(d.get('mail', {}).get('forwarded', [])) for d in users.values())} "
          "(see Q8)."]
@@ -951,7 +994,8 @@ def build_questions(inv: dict) -> list:
 def collect(ctx) -> None:
     opt = ctx.options
     inv = Investigator(ctx, root=opt.get("mac_root") or "/", days=int(opt.get("days") or 90),
-                       watch=opt.get("watch") or [], include_content=bool(opt.get("include_content"))).collect()
+                       watch=opt.get("watch") or [], include_content=bool(opt.get("include_content")),
+                       date_from=opt.get("date_from"), date_to=opt.get("date_to")).collect()
     ctx.add_artifact("mac_investigation", inv, "macOS investigation: mail, messages, usage, networks, spyware, remote access")
 
 

@@ -407,5 +407,50 @@ class TestMacInvestigationOffline(TmpCase):
                 r.run(argv)
 
 
+class TestMacDateRange(TmpCase):
+    def _run(self, frm, to):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        import mac_fixture
+        from aletheia.core.context import CaseInfo
+        from aletheia.scan import run_scan
+
+        vol = os.path.join(self.tmp, "MacHD")
+        if not os.path.exists(vol):
+            mac_fixture.build(vol)
+        res = run_scan(CaseInfo(case_id="RANGE", examiner="CI"), os.path.join(self.tmp, "out"), profile="quick",
+                       log=lambda *a, **k: None,
+                       options={"mac_investigation": True, "mac_root": vol, "watch": [mac_fixture.WATCHED],
+                                "date_from": frm, "date_to": to})
+        data = json.load(open(os.path.join(res["summary"]["case_dir"], "report", "report.json")))
+        return {q["id"]: q["tables"] for q in data["investigation"]["questions"]}, data
+
+    def test_range_filters_dated_records(self):
+        # fixture "now" is 2026-11-10; forwarded mails on 10-11 and 11-05, deleted mail 11-04, messages 11-07 & 11-09
+        q, data = self._run("2026-11-03", "2026-11-08")
+        self.assertEqual(q["Q1"]["Mail sent/forwarded to watched addresses"]["total"], 1)
+        self.assertEqual(q["Q1"]["Visits to webmail forwarding/rules pages"]["total"], 0)
+        self.assertEqual(q["Q8"]["Deleted / Trash e-mails"]["total"], 1)
+        self.assertEqual(q["Q2"]["Messages by contact"]["total"], 1)       # only the 11-07 message
+        self.assertEqual(q["Q3"]["Downloads"]["total"], 0)                 # download was 10-21
+        # current-state evidence is NOT date-filtered
+        self.assertEqual(q["Q6"]["Remote/monitoring software matches"]["total"] > 0, True)
+        self.assertEqual(q["Q1"]["Mail rules that forward/redirect"]["total"], 1)
+        self.assertTrue(data["investigation"]["range"]["explicit"])
+        self.assertEqual(data["investigation"]["range"]["label"], "2026-11-03 to 2026-11-08")
+
+    def test_wide_range_includes_everything(self):
+        q, _ = self._run("2026-01-01", "2026-12-31")
+        self.assertEqual(q["Q1"]["Mail sent/forwarded to watched addresses"]["total"], 2)
+        self.assertEqual(q["Q2"]["Messages by contact"]["total"], 2)
+
+    def test_cli_rejects_bad_dates(self):
+        from aletheia.cli import main
+
+        self.assertEqual(main(["scan", "--examiner", "x", "--output", self.tmp, "--from", "11/01/2026",
+                               "--no-prompt"]), 2)
+        self.assertEqual(main(["scan", "--examiner", "x", "--output", self.tmp, "--from", "2026-11-05",
+                               "--to", "2026-11-01", "--no-prompt"]), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
