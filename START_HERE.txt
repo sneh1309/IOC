@@ -1,0 +1,22 @@
+ALETHEIA - READ-ONLY MAC INVESTIGATION KIT
+==========================================
+
+1. PREPARE (on YOUR computer, once, needs internet)
+   - Format the USB stick as exFAT, name it EVIDENCE.
+   - Copy this whole "aletheia" folder onto the stick  ->  EVIDENCE/aletheia/
+   - Windows: open aletheia\setup and double-click SETUP_USB_Windows.bat
+     Mac:     bash /Volumes/EVIDENCE/aletheia/setup/setup_usb_mac.command
+   - Wait for "DONE". You should now see folders python-aarch64 and python-x86_64.
+
+2. AT THE CLIENT'S MAC (with the owner's written permission)
+   - System Settings > Privacy & Security > Full Disk Access > turn ON "Terminal".
+   - Open Terminal, type:  bash /Volumes/EVIDENCE/aletheia/mac/run_mac_investigation.command
+   - Answer the questions (put the suspect e-mail address at "Watch for").
+   - Wait 10-40 min. Write down the "Manifest SHA-256". Quit Terminal, eject the USB.
+
+3. ON YOUR COMPUTER
+   - Open aletheia/cases/<case>/report/report.html  ->  section 1A answers Q1-Q9.
+   - Print to PDF for the file.
+
+Full instructions: Aletheia_Mac_User_Guide.pdf (in this folder).
+Read-only: nothing on the Mac is deleted, changed, reset or installed.

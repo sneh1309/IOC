@@ -29,7 +29,9 @@ echo
 # ---------------------------------------------------------------- 1. Python
 PY=""
 # Portable Python on the USB (preferred). exFAT cannot store symlinks, so also accept python3.NN directly.
-for c in "$ROOT/python/bin/python3" "$ROOT"/python/bin/python3.1[0-9] "$ROOT"/python/bin/python3.9; do
+ARCH="$(uname -m)"; [ "$ARCH" = "arm64" ] && ARCH="aarch64"     # python-aarch64 = Apple Silicon, python-x86_64 = Intel
+for c in "$ROOT/python-$ARCH/bin/python3" "$ROOT"/python-"$ARCH"/bin/python3.1[0-9] \
+         "$ROOT/python/bin/python3" "$ROOT"/python/bin/python3.1[0-9] "$ROOT"/python/bin/python3.9; do
   if [ -f "$c" ] && [ -z "$PY" ]; then
     [ -x "$c" ] || /bin/chmod +x "$c" 2>/dev/null   # (on the USB stick only)
     "$c" -c 'import sys' >/dev/null 2>&1 && PY="$c"
@@ -48,8 +50,8 @@ fi
 if [ -z "$PY" ]; then
   warn "No Python 3 is available on this Mac or on the USB stick."
   echo "    To stay read-only we will NOT install anything on this Mac."
-  echo "    Put a portable Python on the USB as described in the User Guide (Step 1.4),"
-  echo "    in the folder: $ROOT/python"
+  echo "    On YOUR computer, run the USB setup script once (setup/SETUP_USB_Windows.bat or"
+  echo "    setup/setup_usb_mac.command) - it puts portable Python into $ROOT/python-$ARCH"
   echo "    Nothing has been changed on this Mac."
   exit 1
 fi

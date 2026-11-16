@@ -42,17 +42,19 @@
 
 ## Step 1: Prepare the USB stick (on YOUR computer, not the client's Mac)
 
-1. **USB stick**: 32 GB or more. Format it as **exFAT** so it works on Mac and Windows. Name it e.g. `EVIDENCE`.
-2. **Download Aletheia**: https://github.com/sneh1309/IOC → **Code → Download ZIP**. Unzip it and rename the folder to `aletheia`. Copy it to the stick, giving `EVIDENCE/aletheia/`.
-3. **Check the files**: you should see `EVIDENCE/aletheia/run_aletheia.py` and `EVIDENCE/aletheia/mac/run_mac_investigation.command`.
-4. **Portable Python** (recommended, so nothing is installed on the client's Mac):
-    1. Open https://github.com/astral-sh/python-build-standalone/releases and pick the latest release.
-    2. Download the file ending in **`-aarch64-apple-darwin-install_only.tar.gz`** (Apple Silicon: M1/M2/M3/M4) **or** **`-x86_64-apple-darwin-install_only.tar.gz`** (Intel Macs). Pick a `cpython-3.12.x` file. To know which Mac you have: Apple menu → About This Mac → **Chip: Apple M…** = aarch64, **Processor: Intel** = x86_64.
-    3. Extract it. You get a folder called `python`. Copy it to `EVIDENCE/aletheia/python/`, so that `EVIDENCE/aletheia/python/bin/` contains `python3.12` (a `python3` shortcut may be missing on exFAT sticks; that is fine).
-    4. If you prepared the stick **on a Mac**, run this once on *your* Mac so Gatekeeper doesn't block it later:
-      `xattr -dr com.apple.quarantine /Volumes/EVIDENCE/aletheia`
-    > Without portable Python, the tool uses the Mac's own Python **only if it is already installed**. If neither is available, it stops without changing anything.
-5. Optional: copy extra IOC lists or YARA rules into `EVIDENCE/aletheia/` (see the main README).
+1. **USB stick**: 32 GB or more. Format it as **exFAT** so it works on Mac and Windows. Name it `EVIDENCE`.
+   * Windows: File Explorer → right-click the stick → Format → File system **exFAT** → Volume label `EVIDENCE` → Start.
+   * Mac: Disk Utility → select the stick → Erase → Format **ExFAT** → Name `EVIDENCE`.
+2. **Unzip `Aletheia_USB.zip` onto the stick.** You should then have `EVIDENCE/aletheia/` containing `run_aletheia.py`, `mac/`, `setup/` and this guide.
+3. **Add portable Python (once, needs internet).** This lets the tool run on any Mac without installing anything on it:
+    * **Windows:** open `EVIDENCE\aletheia\setup` and double-click **`SETUP_USB_Windows.bat`**. If Windows SmartScreen asks, choose *More info → Run anyway*.
+    * **Mac:** in Terminal run `bash /Volumes/EVIDENCE/aletheia/setup/setup_usb_mac.command`
+    * It downloads the official portable Python 3.12 for **both** Apple Silicon and Intel Macs, checks the SHA-256, and prints **DONE**. The launcher automatically picks the right one on the client's Mac.
+4. **Check**: `EVIDENCE/aletheia/` now has the folders `python-aarch64` and `python-x86_64`.
+5. **Practice run** on a Mac you own (Steps 3–6) before going to the client.
+6. Optional: copy extra IOC lists or YARA rules into `EVIDENCE/aletheia/` (see the main README).
+
+> Without the portable Python, the tool uses the Mac's own Python **only if it is already installed**. If neither is available, it stops without changing anything.
 
 ---
 
@@ -160,8 +162,8 @@ For Gmail: Settings → *Forwarding and POP/IMAP* and *Filters*; Google Account 
 
 | Message | Fix |
 |---|---|
-| `No Python 3 is available` | Put portable Python on the USB (Step 1.4). Nothing was changed on the Mac. |
-| `"python3" cannot be opened because the developer cannot be verified` | On *your* Mac run `xattr -dr com.apple.quarantine /Volumes/EVIDENCE/aletheia`, or download the portable Python on Windows. |
+| `No Python 3 is available` | Run the USB setup script on your computer (Step 1.3). Nothing was changed on the Mac. |
+| `"python3.12" cannot be opened because the developer cannot be verified` | On *your* computer re-run the USB setup script (it clears the download flag), or on your Mac run `xattr -dr com.apple.quarantine /Volumes/EVIDENCE/aletheia`. |
 | `Terminal does NOT have Full Disk Access` | Step 3, then quit Terminal with ⌘Q and reopen it. |
 | Report says *permission denied* in "Collection access problems" | Same as above: Full Disk Access was not active. Re-run. |
 | Q2 app usage is empty | Normal on macOS 14+ (Apple moved app usage to a new format). Use Q4 activity, browser and Messages tables instead. |
