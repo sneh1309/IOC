@@ -140,5 +140,5 @@ rule ALETHEIA_Linux_LD_Preload_Rootkit
         $c = "dlsym" ascii
         $d = "RTLD_NEXT" ascii
     condition:
-        $elf at 0 and $a and $b and ($c or $d)
+        filesize < 2MB and $elf at 0 and $a and $b and ($c or $d)
 }

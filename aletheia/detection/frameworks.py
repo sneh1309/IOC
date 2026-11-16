@@ -67,6 +67,15 @@ ATTACK = {
     "T1021.001": ("Remote Services: Remote Desktop Protocol", "Lateral Movement"),
     "T1569.002": ("System Services: Service Execution", "Execution"),
     "T1112": ("Modify Registry", "Defense Evasion"),
+    "T1056.001": ("Input Capture: Keylogging", "Collection / Credential Access"),
+    "T1113": ("Screen Capture", "Collection"),
+    "T1114.003": ("Email Collection: Email Forwarding Rule", "Collection"),
+    "T1021": ("Remote Services", "Lateral Movement"),
+    "T1021.005": ("Remote Services: VNC", "Lateral Movement"),
+    "T1070": ("Indicator Removal", "Defense Evasion"),
+    "T1070.006": ("Indicator Removal: Timestomp", "Defense Evasion"),
+    "T1072": ("Software Deployment Tools", "Execution / Lateral Movement"),
+    "T1548": ("Abuse Elevation Control Mechanism", "Privilege Escalation"),
 }
 
 D3FEND = {

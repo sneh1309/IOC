@@ -20,7 +20,7 @@ READ_ONLY_COMMANDS = {
     # cross-platform / POSIX
     "ps", "netstat", "lsof", "who", "w", "last", "lastb", "lastlog", "uname", "uptime", "id",
     "getent", "dpkg-query", "rpm", "systemctl", "journalctl", "crontab", "ss", "ip", "ifconfig",
-    "lsmod", "mount", "df", "getenforce", "sestatus", "ufw", "iptables-save", "nft", "sw_vers",
+    "lsmod", "mount", "tmutil", "df", "getenforce", "sestatus", "ufw", "iptables-save", "nft", "sw_vers",
     "launchctl", "dscl", "csrutil", "spctl", "fdesetup", "pkgutil", "system_profiler", "kextstat",
     "profiles", "sysctl", "hostname", "date", "timedatectl", "loginctl", "aa-status", "pfctl",
     # Windows
@@ -28,6 +28,8 @@ READ_ONLY_COMMANDS = {
     "systeminfo", "wmic", "powershell", "powershell.exe", "query", "quser", "arp", "route",
     "driverquery", "bcdedit", "manage-bde", "auditpol", "cmdkey",
     # optional third-party read-only scanners (see integrations/external.py)
+    # macOS investigation (sub-commands restricted by ALLOWED_FIRST_ARGS below)
+    "log", "pmset", "sfltool", "security", "systemextensionsctl", "systemsetup", "kmutil", "sharing",
     "yara", "clamscan", "chkrootkit", "rkhunter", "osqueryi", "hayabusa", "chainsaw",
     "autorunsc", "autorunsc64", "sigcheck", "sigcheck64", "lynis", "loki", "capa", "gpg",
 }
@@ -39,14 +41,34 @@ FORBIDDEN_TOKENS = {
     "sc": {"create", "delete", "config", "start", "stop", "pause", "failure", "sdset"},
     "net": {"stop", "start", "pause", "continue"},
     "systemctl": {"start", "stop", "restart", "enable", "disable", "mask", "kill", "reload", "daemon-reload", "isolate"},
-    "launchctl": {"load", "unload", "bootout", "bootstrap", "kill", "remove", "start", "stop", "enable", "disable"},
+    "launchctl": {"load", "unload", "bootout", "bootstrap", "kill", "remove", "start", "stop", "enable", "disable",
+                  "kickstart", "setenv", "unsetenv", "config", "submit", "asuser", "reboot"},
     "crontab": {"-r", "-e"},
+    "security": {"-d", "-i"},
     "clamscan": {"--remove", "--move", "--copy"},
     "wevtutil": {"cl", "clear-log", "sl", "set-log", "im", "install-manifest", "um", "uninstall-manifest"},
     "netsh": {"add", "delete", "set", "reset"},
     "nft": {"add", "delete", "flush", "insert", "replace", "create"},
     "ufw": {"enable", "disable", "allow", "deny", "reject", "delete", "reset", "insert"},
 }
+
+# For these binaries ONLY the listed first argument (sub-command) is permitted - everything else is refused.
+ALLOWED_FIRST_ARGS = {
+    "log": {"show"},                      # never: erase, config, collect, stream
+    "pmset": {"-g"},                      # read settings/history only
+    "profiles": {"list", "show", "status"},  # never: install, remove, renew, -D, -R, -I
+    "sfltool": {"dumpbtm"},               # never: resetbtm, clear, add-item ...
+    "systemextensionsctl": {"list"},
+    "kmutil": {"showloaded"},
+    "sharing": {"-l"},
+    "tmutil": {"listbackups", "destinationinfo", "latestbackup"},
+    "csrutil": {"status", "authenticated-root"},
+    "spctl": {"--status"},
+    "fdesetup": {"status", "isactive"},
+    "security": {"dump-keychain"},        # metadata only; "-d" (dump secrets) is forbidden below
+}
+# Every argument of these must start with one of the prefixes.
+ARG_PREFIX_ONLY = {"systemsetup": ("-get",)}
 
 POWERSHELL_FORBIDDEN = (
     "remove-", "set-", "stop-", "start-", "new-", "clear-", "disable-", "enable-", "invoke-webrequest",
@@ -79,6 +101,12 @@ class SafeRunner:
         if base not in READ_ONLY_COMMANDS and base_noext not in READ_ONLY_COMMANDS:
             raise CommandRefused(f"'{base}' is not on the read-only allow-list")
         lowered = [a.lower() for a in argv[1:]]
+        allowed_first = ALLOWED_FIRST_ARGS.get(base_noext)
+        if allowed_first is not None and (not argv[1:] or argv[1] not in allowed_first):
+            raise CommandRefused(f"'{base}' sub-command {argv[1:2]} is not permitted (allowed: {sorted(allowed_first)})")
+        prefixes = ARG_PREFIX_ONLY.get(base_noext)
+        if prefixes and any(not a.lower().startswith(prefixes) for a in argv[1:]):
+            raise CommandRefused(f"'{base}' may only be used with {prefixes} arguments")
         forbidden = FORBIDDEN_TOKENS.get(base_noext, set())
         if forbidden and any(tok in forbidden for tok in lowered):
             raise CommandRefused(f"state-changing arguments refused for '{base}': {argv[1:]}")

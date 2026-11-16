@@ -43,7 +43,9 @@ class ScanContext:
     findings: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     tool_runs: list = field(default_factory=list)
+    options: dict = field(default_factory=dict)  # e.g. mac_investigation, watch, days, include_content, mac_root
     log: Any = print
+    progress: Any = None
 
     @property
     def limits(self) -> dict:

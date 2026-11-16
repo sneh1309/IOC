@@ -84,6 +84,37 @@ class EvidenceStore:
             n += 1
         return self._write_once(path, text.encode("utf-8", errors="replace"))
 
+    def copy_file_once(self, src: str, subdir: str, name: str, max_bytes: int = 4 * 1024 ** 3) -> dict:
+        """Stream a byte-exact copy of `src` (opened read-only) into the case folder.
+        Returns the index record including the SHA-256 of the bytes read from the original."""
+        import hashlib
+
+        from aletheia.core.util import open_readonly
+
+        target_dir = os.path.join(self.case_dir, subdir)
+        os.makedirs(target_dir, exist_ok=True)
+        path = os.path.join(target_dir, safe_name(name))
+        h, size = hashlib.sha256(), 0
+        with open_readonly(src) as fin, open(path, "xb") as fout:
+            for chunk in iter(lambda: fin.read(1024 * 1024), b""):
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ValueError(f"{src} exceeds {max_bytes} bytes - not copied")
+                h.update(chunk)
+                fout.write(chunk)
+            fout.flush()
+            os.fsync(fout.fileno())
+        make_readonly(path)
+        rec = {"path": os.path.relpath(path, self.case_dir).replace(os.sep, "/"), "sha256": h.hexdigest(),
+               "size": size, "written_utc": utc_now(), "source": src}
+        self.index.append(rec)
+        return rec
+
+    def save_bytes(self, name: str, data: bytes, subdir: str, ext: str) -> dict:
+        target_dir = os.path.join(self.case_dir, subdir)
+        os.makedirs(target_dir, exist_ok=True)
+        return self._write_once(os.path.join(target_dir, safe_name(name) + ext), data)
+
     def save_command_output(self, label: str, stdout: str) -> dict:
         return self.save_text(label, stdout, subdir=os.path.join("evidence", "commands"))
 

@@ -96,3 +96,18 @@ def my_rule(a, db):
 ```
 
 Add a test in `tests/test_aletheia.py` using synthetic artefacts. Never touch the host system in tests.
+
+## macOS investigation rules (`collectors/macos_forensics.py`)
+
+| Rule | Detects | ATT&CK |
+|---|---|---|
+| `MAC-001` | Remote-access, monitoring, keylogger or stalkerware product installed (apps, InstallHistory, login/background items, system extensions, profiles) | T1219 / T1056.001 / T1113 |
+| `MAC-002` | Non-Apple app granted Input Monitoring, Screen Recording, Accessibility, synthetic input or Full Disk Access (TCC) | T1056.001 / T1113 / T1548 |
+| `MAC-003` | Remote Login (SSH), Screen Sharing / Remote Management, Remote Apple Events enabled | T1021 |
+| `MAC-004` | Remote session / authentication events (screensharingd, sshd, ARDAgent) in the unified log | T1021.004 / T1021.005 |
+| `MAC-005` | Apple Mail rule that forwards / redirects mail or references a watched address | T1114.003 |
+| `MAC-006` | Mail sent or forwarded to a watched address (first/last date) | T1114.003 |
+| `MAC-007` | Log erase, system clock change or `tccutil` privacy reset events | T1070 / T1070.006 |
+| `MAC-008` | Configuration profiles or MDM enrolment present | T1072 |
+
+The investigation also produces the Q1–Q9 answer tables (report section 1A, `report/investigation/*.csv`). See [MAC_USER_GUIDE.md](MAC_USER_GUIDE.md).

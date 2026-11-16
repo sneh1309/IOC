@@ -19,7 +19,7 @@ CSS = """
 *{box-sizing:border-box}body{font:14px/1.5 "Segoe UI",Roboto,Helvetica,Arial,sans-serif;color:var(--ink);
 background:var(--bg);margin:0}main{max-width:1050px;margin:0 auto;padding:32px 24px}
 h1{font-size:26px;margin:0 0 4px}h2{font-size:19px;border-bottom:2px solid var(--accent);padding-bottom:4px;
-margin-top:36px;color:var(--accent)}h3{font-size:15px;margin:18px 0 6px}
+margin-top:36px;color:var(--accent)}h3{font-size:15px;margin:18px 0 6px}h4{font-size:13.5px;margin:14px 0 4px}
 table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:12.5px}
 th,td{border:1px solid var(--line);padding:5px 7px;text-align:left;vertical-align:top;word-break:break-word}
 th{background:var(--soft)}code,pre{font:12px/1.4 Consolas,"Courier New",monospace}
@@ -32,7 +32,8 @@ text-transform:uppercase;white-space:nowrap}.nw{white-space:nowrap}.critical{bac
 .finding{border:1px solid var(--line);border-left:5px solid var(--info);padding:10px 14px;margin:12px 0;
 page-break-inside:avoid}.finding.sev-critical{border-left-color:var(--crit)}.finding.sev-high{border-left-color:var(--high)}
 .finding.sev-medium{border-left-color:var(--med)}.finding.sev-low{border-left-color:var(--low)}
-.kv td:first-child{width:28%;font-weight:600;background:var(--soft)}
+.qa{border:1px solid var(--line);border-left:5px solid var(--accent);padding:10px 14px;margin:14px 0}
+.qa h4{page-break-after:avoid}.kv td:first-child{width:28%;font-weight:600;background:var(--soft)}
 .sig{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:20px}.sig div{border-top:1px solid var(--ink);
 padding-top:4px;margin-top:48px}.notice{border:1px solid var(--med);background:#fff8e6;padding:10px 14px}
 .toc a{color:var(--accent);text-decoration:none}footer{margin-top:40px;font-size:11px;color:var(--muted);
@@ -86,7 +87,8 @@ def render(data: dict, timeline: list) -> str:
                "<code>logs/audit.jsonl</code>; run <code>aletheia verify &lt;case-folder&gt;</code> to re-validate."
                "</p></section>")
 
-    sections = [("summary", "1. Executive Summary"), ("scope", "2. Scope, Authority & Limitations"),
+    sections = [("summary", "1. Executive Summary")] + (
+        [("questions", "1A. Investigation Questions & Answers")] if data.get("investigation") else []) + [("scope", "2. Scope, Authority & Limitations"),
                 ("method", "3. Methodology & Standards"), ("findings", "4. Detailed Findings"),
                 ("attack", "5. MITRE ATT&CK Coverage"), ("timeline", "6. Timeline of Events"),
                 ("system", "7. System Profile"), ("remediation", "8. Proposed Remediation (NOT executed)"),
@@ -111,6 +113,45 @@ def render(data: dict, timeline: list) -> str:
         out.append("</table>")
     out.append(f"<p><b>Host:</b> {E(str(host.get('hostname')))} &middot; {E(str(host.get('distribution') or host.get('os')))}"
                f" &middot; IPs {E(', '.join(host.get('ip_addresses') or []))}</p>")
+
+    # -------------------------------------------------------- investigation
+    inv = data.get("investigation")
+    if inv:
+        out.append("<h2 id='questions'>1A. Investigation Questions &amp; Answers</h2>")
+        out.append(f"<p class='muted'>macOS investigation ({E(str(inv.get('mode')))}), period "
+                   f"<b>{E((inv.get('range') or {}).get('label') or str(inv.get('days')) + ' days')}</b> (dated records outside this "
+                   "period are excluded; current settings, installed apps and permissions are always shown); watched terms: "
+                   f"<b>{E(', '.join(inv.get('watch') or []) or 'none')}</b>; owner e-mail(s): "
+                   f"<b>{E(', '.join(inv.get('owner_emails') or []) or 'not given')}</b>. Times in this section are the "
+                   "<b>local time of the examined Mac</b> with UTC offset. Every database used was preserved "
+                   "byte-for-byte under <code>evidence/databases/</code> (SHA-256 below) and analysed only as a copy; "
+                   "complete tables are in <code>report/investigation/*.csv</code>.</p>")
+        for q in inv.get("questions", []):
+            out.append(f"<div class='qa' id='{E(q['id'])}'><h3>{E(q['id'])} &middot; {E(q['question'])}</h3><ul>"
+                       + "".join(f"<li>{E(a)}</li>" for a in q.get("answer", [])) + "</ul>")
+            for title, t in q.get("tables", {}).items():
+                total = t.get("total", len(t["rows"]))
+                out.append(f"<h4>{E(title)} <span class='muted'>({total} record{'s' if total != 1 else ''}"
+                           f"{', first 150 shown' if total > 150 else ''})</span></h4>")
+                if not t["rows"]:
+                    out.append("<p class='muted'>None found.</p>")
+                    continue
+                out.append("<table><tr>" + "".join(f"<th>{E(c)}</th>" for c in t["columns"]) + "</tr>")
+                for row in t["rows"][:150]:
+                    out.append("<tr>" + "".join(
+                        f"<td>{E(', '.join(map(str, v)) if isinstance(v, list) else ('' if v is None else str(v)))[:400]}</td>"
+                        for v in row) + "</tr>")
+                out.append("</table>")
+            out.append("</div>")
+        dbs = inv.get("databases") or []
+        if dbs:
+            out.append("<h3>Databases preserved for this investigation</h3><table><tr><th>Source</th><th>File</th>"
+                       "<th>SHA-256 (original = copy)</th><th>Bytes</th></tr>")
+            for d in dbs:
+                for f in d.get("files", []):
+                    out.append(f"<tr><td><code>{E(d['original'])}</code></td><td>{E(f['file'])}</td>"
+                               f"<td><code>{E(f['sha256'])}</code></td><td>{f['size']}</td></tr>")
+            out.append("</table>")
 
     # --------------------------------------------------------------- scope
     scope = data.get("scope") or {}

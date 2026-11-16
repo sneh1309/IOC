@@ -39,6 +39,14 @@ LEGAL_NOTES = [
 ]
 
 
+def _investigation(ctx):
+    inv = ctx.artifacts.get("mac_investigation")
+    if not inv:
+        return None
+    return {k: inv.get(k) for k in ("mode", "days", "range", "watch", "owner_emails", "include_content", "access_problems", "databases",
+                                     "questions")}
+
+
 def tool_fingerprint() -> dict:
     """SHA-256 of every source/rule file of the running Aletheia build (proves which code produced the report)."""
     base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -91,6 +99,18 @@ def timeline(ctx) -> list:
     for e in (ctx.artifacts.get("logs") or {}).get("windows_events", [])[:2000]:
         if e.get("time_utc"):
             ev.append({"time": e["time_utc"], "source": e.get("log"), "event": f"Event {e.get('event_id')}"})
+    inv = ctx.artifacts.get("mac_investigation") or {}
+    for q in inv.get("questions", []):
+        if q["id"] not in ("Q1", "Q7", "Q9"):
+            continue
+        for title, t in q.get("tables", {}).items():
+            if "date" not in t["columns"]:
+                continue
+            i = t["columns"].index("date")
+            for row in t["rows"][:500]:
+                if row[i]:
+                    ev.append({"time": row[i], "source": f"{q['id']} {title}",
+                               "event": " | ".join(str(v) for j, v in enumerate(row) if j != i and v)[:200]})
     ev.sort(key=lambda x: str(x["time"]))
     return ev
 
@@ -150,6 +170,20 @@ def timeline_csv(events: list) -> str:
     return buf.getvalue()
 
 
+def investigation_csvs(ctx) -> dict:
+    inv = ctx.artifacts.get("mac_investigation") or {}
+    out = {}
+    for q in inv.get("questions", []):
+        for title, t in q.get("tables", {}).items():
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(t["columns"])
+            for row in t["rows"]:
+                w.writerow(["" if v is None else (", ".join(map(str, v)) if isinstance(v, list) else v) for v in row])
+            out[f"{q['id']}_{title}"] = buf.getvalue()
+    return out
+
+
 def build_report_data(ctx, ioc_db, started: str, ended: str, plan: dict) -> dict:
     from aletheia import feeds
 
@@ -176,4 +210,5 @@ def build_report_data(ctx, ioc_db, started: str, ended: str, plan: dict) -> dict
         "nist_csf": NIST_CSF,
         "nist_ir_phase": NIST_IR_PHASE,
         "audit_chain_head": ctx.audit.head,
+        "investigation": _investigation(ctx),
     }
