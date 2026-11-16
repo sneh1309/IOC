@@ -46,12 +46,12 @@
 2. **Download Aletheia**: https://github.com/sneh1309/IOC → **Code → Download ZIP**. Unzip it and rename the folder to `aletheia`. Copy it to the stick, giving `EVIDENCE/aletheia/`.
 3. **Check the files**: you should see `EVIDENCE/aletheia/run_aletheia.py` and `EVIDENCE/aletheia/mac/run_mac_investigation.command`.
 4. **Portable Python** (recommended, so nothing is installed on the client's Mac):
-   1. Open https://github.com/astral-sh/python-build-standalone/releases and pick the latest release.
-   2. Download the file ending in **`-aarch64-apple-darwin-install_only.tar.gz`** (Apple Silicon: M1/M2/M3/M4) **or** **`-x86_64-apple-darwin-install_only.tar.gz`** (Intel Macs). Pick a `cpython-3.12.x` file. If unsure, take both and put them in two folders.
-   3. Extract it. You get a folder called `python`. Copy it to `EVIDENCE/aletheia/python/`, so that `EVIDENCE/aletheia/python/bin/python3` exists.
-   4. If you prepared the stick **on a Mac**, run this once on *your* Mac so Gatekeeper doesn't block it later:
+    1. Open https://github.com/astral-sh/python-build-standalone/releases and pick the latest release.
+    2. Download the file ending in **`-aarch64-apple-darwin-install_only.tar.gz`** (Apple Silicon: M1/M2/M3/M4) **or** **`-x86_64-apple-darwin-install_only.tar.gz`** (Intel Macs). Pick a `cpython-3.12.x` file. To know which Mac you have: Apple menu → About This Mac → **Chip: Apple M…** = aarch64, **Processor: Intel** = x86_64.
+    3. Extract it. You get a folder called `python`. Copy it to `EVIDENCE/aletheia/python/`, so that `EVIDENCE/aletheia/python/bin/python3` exists.
+    4. If you prepared the stick **on a Mac**, run this once on *your* Mac so Gatekeeper doesn't block it later:
       `xattr -dr com.apple.quarantine /Volumes/EVIDENCE/aletheia`
-   > Without portable Python, the tool uses the Mac's own Python **only if it is already installed**. If neither is available, it stops without changing anything.
+    > Without portable Python, the tool uses the Mac's own Python **only if it is already installed**. If neither is available, it stops without changing anything.
 5. Optional: copy extra IOC lists or YARA rules into `EVIDENCE/aletheia/` (see the main README).
 
 ---
@@ -74,7 +74,7 @@ macOS hides Mail, Messages, Safari and privacy settings from all programs unless
 2. Turn **Terminal** on (click **+** and choose Applications → Utilities → Terminal if it isn't listed). Enter the password when asked.
 3. If Terminal was already open, **quit it completely** (⌘Q).
 
-> **Disclosure:** this is the only setting you change, and it changes nothing about the owner's data. Note the time in your notes. You can switch it off again at the end (Step 6).
+> **Disclosure:** this is the only setting you change, and it changes nothing about the owner's data. Note the time in your notes. You can switch it off again at the end (Step 5).
 
 ---
 
