@@ -102,7 +102,11 @@ macOS hides Mail, Messages, Safari and privacy settings from all programs unless
    | Save results to | press Enter (saves to the USB stick) |
 
 4. When asked for a **password**, type the Mac's administrator password. The characters are invisible; press Return. It's needed only to *read* protected system logs.
-5. **Wait** (a few minutes with a short date range, up to 10–40 minutes for 90+ days) and don't use the Mac. Progress is shown on screen.
+5. **Wait** (a few minutes with a short date range, up to 10–40 minutes for 90+ days) and don't use the Mac. A **progress bar** shows how much is done, the current step (e.g. `Step 9/18`), what it is reading right now, the time elapsed, and an estimate of the time left:
+   ```
+    ██████████████████░░░░░░░░░░░░░░░░░░░░░░  45%  Step 9/18
+     Elapsed 03:12 | about 03:55 left | Mac investigation: reading system log: remote access
+   ```
 6. When finished, the screen shows the **result folder** and a **Manifest SHA-256**. **Write the SHA-256 in your notes.** It proves later that nothing in the results was changed.
 
 > Don't open the report on the client's Mac. A browser would create new history entries on it.
@@ -131,8 +135,9 @@ macOS hides Mail, Messages, Safari and privacy settings from all programs unless
    * **1A. Investigation Questions & Answers**: Q1–Q9 in plain language with tables. All times are the Mac's local time.
    * **4. Detailed Findings**: each suspicious item, its evidence, and its MITRE ATT&CK technique.
    * Full tables for spreadsheets are in `report/investigation/*.csv`. They open in Excel.
-4. **PDF for the file/court**: browser → Print → *Save as PDF*. Sign section 13 (Examiner Declaration).
-5. **Make two copies** of the whole case folder (working + archive) and run `verify` on each.
+4. **Case documentation (created automatically):** `report/Case_Documentation_<CASE>.docx` is an editable Word document. It holds the case details, verdict, answers to Q1–Q9 with key tables, work performed, recommendations, an online-checks table to tick off, evidence hashes, limitations and sign-off lines. A Markdown copy (`.md`) sits next to it for pasting into ITGlue or a ticket. To edit it, **save a copy first** (Word → Save As), because the original is sealed in the evidence manifest.
+5. **PDF for the file/court**: browser → Print → *Save as PDF*. Sign section 13 (Examiner Declaration).
+6. **Make two copies** of the whole case folder (working + archive) and run `verify` on each.
 
 ### Reading the key answers
 

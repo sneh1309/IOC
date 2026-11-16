@@ -61,7 +61,7 @@ def cmd_scan(args) -> int:
     res = run_scan(case, args.output, profile=args.profile, paths=args.path, iocs=args.ioc, yara=args.yara,
                    tools=args.with_tools, allow_tool_footprint=args.allow_tool_footprint, pdf=args.pdf,
                    sign_key=args.sign, min_remediation_severity=args.remediation_min_severity, log=log,
-                   options=options)
+                   options=options, show_progress=not (args.json or args.no_progress))
     s, plan = res["summary"], res["plan"]
     if args.json:
         print(json.dumps(s, indent=2))
@@ -77,6 +77,8 @@ def cmd_scan(args) -> int:
     _p("\nReport (HTML)   : " + s["report_html"])
     if s.get("report_pdf"):
         _p("Report (PDF)    : " + s["report_pdf"])
+    if s.get("case_document"):
+        _p("Case document   : " + s["case_document"] + "  (+ .md)")
     _p("Case folder     : " + s["case_dir"])
     _p("Manifest SHA-256: " + s["manifest_sha256"] + "   <- record this in your case notes")
     _p("\nAnalysis is complete and sealed. NOTHING on this device was changed.")
@@ -243,6 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pdf", action="store_true", help="also render report.pdf using local Chrome/Chromium/Edge")
     s.add_argument("--sign", metavar="GPG_KEY", help="detach-sign SHA256SUMS with this GPG key")
     s.add_argument("--no-prompt", action="store_true", help="do not offer remediation at the end")
+    s.add_argument("--no-progress", action="store_true", help="plain log output instead of the progress bar")
     s.add_argument("--analysis-only", action="store_true",
                    help="pure read-only examination: never offer or mention executing remediation")
     s.add_argument("--watch", action="append", metavar="TERM",

@@ -110,6 +110,11 @@ class EvidenceStore:
         self.index.append(rec)
         return rec
 
+    def save_bytes(self, name: str, data: bytes, subdir: str, ext: str) -> dict:
+        target_dir = os.path.join(self.case_dir, subdir)
+        os.makedirs(target_dir, exist_ok=True)
+        return self._write_once(os.path.join(target_dir, safe_name(name) + ext), data)
+
     def save_command_output(self, label: str, stdout: str) -> dict:
         return self.save_text(label, stdout, subdir=os.path.join("evidence", "commands"))
 

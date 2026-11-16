@@ -452,5 +452,42 @@ class TestMacDateRange(TmpCase):
                                "--to", "2026-11-01", "--no-prompt"]), 2)
 
 
+class TestProgressAndDocument(TmpCase):
+    def test_progress_plain_output_reaches_100(self):
+        import io as _io
+
+        from aletheia.core.progress import Progress
+
+        buf = _io.StringIO()
+        p = Progress([("a", "Alpha", 1), ("b", "Beta", 3), ("c", "Gamma", 0)], stream=buf)
+        p.stage("a")
+        p.stage("b")
+        p.update(0.5, "half")
+        self.assertAlmostEqual(p.fraction, 0.625)
+        p.finish()
+        out = buf.getvalue()
+        self.assertIn("Step 2/2", out)       # zero-weight stage is hidden
+        self.assertIn("[100%]", out)
+
+    def test_case_document_created_and_sealed(self):
+        import zipfile as _zf
+
+        from aletheia.core.context import CaseInfo
+        from aletheia.scan import run_scan
+
+        res = run_scan(CaseInfo(case_id="DOC 1", examiner="CI"), os.path.join(self.tmp, "out"), profile="quick",
+                       paths=[self.tmp], log=lambda *a, **k: None)
+        doc = res["summary"]["case_document"]
+        self.assertTrue(doc.endswith("Case_Documentation_DOC_1.docx"))
+        with _zf.ZipFile(doc) as z:
+            xml = z.read("word/document.xml").decode()
+            self.assertIn("Investigation Case Documentation", xml)
+            self.assertIn("Examiner sign-off", xml)
+            import xml.dom.minidom as _md
+            _md.parseString(xml)  # well-formed
+        self.assertTrue(os.path.exists(doc[:-5] + ".md"))
+        self.assertTrue(engine.verify_case(res["summary"]["case_dir"])["ok"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

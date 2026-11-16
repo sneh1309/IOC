@@ -17,6 +17,8 @@ ALETHEIA - READ-ONLY MAC INVESTIGATION KIT
 
 3. ON YOUR COMPUTER
    - Open aletheia/cases/<case>/report/report.html  ->  section 1A answers Q1-Q9.
+   - The case document is created automatically: report/Case_Documentation_<case>.docx
+     (save a copy before editing - the original is sealed).
    - Print to PDF for the file.
 
 Full instructions: Aletheia_Mac_User_Guide.pdf (in this folder).

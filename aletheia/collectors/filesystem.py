@@ -51,7 +51,9 @@ def collect(ctx) -> None:
     extra = [p for p in ctx.extra_paths if os.path.exists(p)]
     targets = extra if ctx.options.get("offline") else default_targets(ctx.profile) + extra
     files, truncated = [], False
-    for root in targets:
+    for i, root in enumerate(targets):
+        if ctx.progress is not None:
+            ctx.progress.update(i / max(len(targets), 1), f"{root} ({len(files):,} files so far)")
         if len(files) >= lim["max_files"]:
             truncated = True
             break

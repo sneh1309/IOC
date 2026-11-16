@@ -739,6 +739,7 @@ class Investigator:
             return out
         for label, pred in UNIFIED_LOG_QUERIES.items():
             self.ctx.log(f"    - unified log: {label} ({self.inv['range']['label']}) ...")
+            self._tick(0, f"reading system log: {label.replace('_', ' ')}")
             window = ["--start", self.start_dt.strftime("%Y-%m-%d %H:%M:%S"),
                       "--end", self.end_dt.strftime("%Y-%m-%d %H:%M:%S")]
             txt = self.run(["log", "show", "--style", "syslog", "--info"] + window +
@@ -750,24 +751,41 @@ class Investigator:
                     t = parse_local(m.group(1), m.group(2))
                     events.append({"date": fmt(t), "_ts": t, "process": m.group(3).strip(), "message": m.group(4)[:400]})
             out[label] = events[-20000:]
+            self._tick(4, f"system log: {label.replace('_', ' ')} done ({len(events)} events)")
         return out
 
     # ============================================================== RUN
+    def _tick(self, units: float, detail: str) -> None:
+        """Advance the progress bar by `units` of the investigation's total work."""
+        self._done = getattr(self, "_done", 0.0) + units
+        prog = getattr(self.ctx, "progress", None)
+        if prog is not None:
+            prog.update(self._done / max(self._total, 1), detail)
+
     def collect(self) -> dict:
         inv = self.inv
-        for home in self.homes():
+        homes = self.homes()
+        # work units: 7 per user, 6 system sources, 4 per unified-log query (the slow part on a live Mac)
+        self._total = 7 * len(homes) + 6 + (4 * len(UNIFIED_LOG_QUERIES) if self.live else 0)
+        self._done = 0.0
+        labels = {"mail": "Mail", "messages": "Messages", "browsers": "browser history",
+                  "downloads_quarantine": "downloads", "recent_files": "recent files", "accounts": "accounts & permissions"}
+        for home in homes:
             user = os.path.basename(home)
             self.ctx.log(f"    - user {user}: Mail, Messages, browsers, downloads, app usage, files ...")
             u = {"home": home}
             for key, fn in (("mail", self.mail), ("messages", self.messages), ("browsers", self.browsers),
                             ("downloads_quarantine", self.quarantine), ("recent_files", self.recent_files),
                             ("accounts", self.user_tcc_and_accounts)):
+                self._tick(0, f"user {user}: {labels[key]}")
                 try:
                     u[key] = fn(home)
                 except Exception as exc:
                     self.ctx.error(f"mac:{user}:{key}", exc)
+                self._tick(1, f"user {user}: {labels[key]} done")
             u["knowledge"] = self.knowledge(os.path.join(home, "Library/Application Support/Knowledge/knowledgeC.db"),
                                             f"{user}_knowledgeC")
+            self._tick(1, f"user {user}: app usage done")
             inv["users"][user] = u
         s = inv["system"]
         self.ctx.log("    - system: privacy permissions, installs, Wi-Fi/IP history, sharing, profiles ...")
@@ -776,10 +794,12 @@ class Investigator:
                         ("remote", self.remote_and_management), ("power", self.power_and_logins),
                         ("knowledge", lambda: self.knowledge(self.p("private/var/db/CoreDuet/Knowledge/knowledgeC.db"),
                                                              "system_knowledgeC"))):
+            self._tick(0, f"system: {key}")
             try:
                 s[key] = fn()
             except Exception as exc:
                 self.ctx.error(f"mac:system:{key}", exc)
+            self._tick(1, f"system: {key} done")
         s["unified_logs"] = self.unified_logs()
         inv["questions"] = build_questions(inv)
         shutil.rmtree(self.work, ignore_errors=True)  # disposable working copies only

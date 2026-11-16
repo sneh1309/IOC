@@ -147,6 +147,9 @@ echo "  Started : $START"
 echo "  Finished: $(date '+%Y-%m-%d %H:%M:%S %z')   (exit code $RC)"
 echo "  Results : $OUT"
 echo
+echo "  Inside the case folder: report/report.html (full report) and"
+echo "  report/Case_Documentation_<case>.docx (ready-made case document, + .md copy)."
+echo
 echo "  NEXT: do NOT open the report on this Mac (opening it in a browser would"
 echo "  create new browsing history). Quit Terminal, eject the USB stick, and open"
 echo "  report/report.html on YOUR computer (see User Guide, Step 6)."

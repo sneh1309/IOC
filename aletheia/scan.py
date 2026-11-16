@@ -16,13 +16,14 @@ from aletheia.collectors import (accounts, filesystem, logs, macos_forensics, ne
 from aletheia.core.audit import AuditLog
 from aletheia.core.context import CaseInfo, ScanContext
 from aletheia.core.evidence import EvidenceStore, safe_name
+from aletheia.core.progress import Progress
 from aletheia.core.runner import SafeRunner
 from aletheia.core.util import utc_now
 from aletheia.detection import ioc as ioc_mod
 from aletheia.detection import rules, yara_scan
 from aletheia.integrations import external
 from aletheia.remediation.planner import build_plan
-from aletheia.report import builder, html as html_report
+from aletheia.report import builder, docx as case_doc, html as html_report
 
 # RFC 3227 order of volatility: most volatile first.
 COLLECTION_ORDER = [
@@ -39,7 +40,13 @@ COLLECTION_ORDER = [
 
 def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None, iocs=None, yara=None,
              tools=None, allow_tool_footprint=False, pdf=False, sign_key=None, min_remediation_severity="medium",
-             log=print, options=None) -> dict:
+             log=print, options=None, show_progress=False) -> dict:
+    opts = dict(options or {})
+    mac_root = opts.get("mac_root")
+    offline = bool(mac_root) and os.path.abspath(mac_root) != os.path.abspath(os.sep)
+    prog = Progress(_stages(offline, bool(opts.get("mac_investigation")), bool(tools), pdf), enabled=show_progress)
+    if show_progress:
+        log = prog.log  # print messages above the progress bar
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     case_dir = os.path.abspath(os.path.join(output, f"{safe_name(case.case_id)}_{stamp}"))
     os.makedirs(case_dir, exist_ok=False)
@@ -49,7 +56,7 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
     ctx = ScanContext(case=case, case_dir=case_dir, profile=profile, extra_paths=list(paths or []),
                       ioc_sources=list(iocs or []), yara_sources=list(yara or []), external_tools=list(tools or []),
                       allow_tool_footprint=allow_tool_footprint, audit=audit, store=store, runner=runner, log=log,
-                      options=dict(options or {}))
+                      options=opts, progress=prog)
     started = utc_now()
     fp = builder.tool_fingerprint()
     audit.record("case_opened", {"case": case.__dict__, "argv": sys.argv, "profile": profile, "case_dir": case_dir,
@@ -60,8 +67,6 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
                     subdir=".")
     _warn_output_location(ctx, log)
 
-    mac_root = ctx.options.get("mac_root")
-    offline = bool(mac_root) and os.path.abspath(mac_root) != os.path.abspath(os.sep)
     order = COLLECTION_ORDER
     if offline:
         # The evidence is a mounted volume: never examine the host this tool happens to run on.
@@ -69,10 +74,11 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
         audit.record("offline_mode", {"evidence_root": os.path.abspath(mac_root)})
         ctx.extra_paths = macos_forensics.offline_targets(mac_root) + ctx.extra_paths
         ctx.options["offline"] = True
-        order = [("offline_source", macos_forensics.offline_source, "evidence volume identity"),
+        order = [("system", macos_forensics.offline_source, "evidence volume identity"),
                  ("persistence", macos_forensics.offline_persistence, "launch agents/daemons on the volume"),
                  ("filesystem", filesystem.collect, "file-system triage of the volume")]
     for name, fn, desc in order:
+        prog.stage(name)
         log(f"[*] Collecting {desc} ...")
         audit.record("collector_start", {"collector": name})
         try:
@@ -82,6 +88,7 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
             log(f"    [!] {name}: {exc}")
 
     if ctx.options.get("mac_investigation"):
+        prog.stage("macos")
         log("[*] macOS investigation (mail, messages, usage, networks, spyware, remote access) ...")
         audit.record("collector_start", {"collector": "macos_investigation", "options": {
             k: v for k, v in ctx.options.items() if k != "watch"}, "watch_terms": len(ctx.options.get("watch") or [])})
@@ -91,25 +98,30 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
             ctx.error("collector:macos_investigation", exc)
             log(f"    [!] macOS investigation: {exc}")
 
+    prog.stage("ioc")
     log("[*] Loading threat intelligence (IOC feeds) ...")
     db = ioc_mod.load_database(ctx.ioc_sources)
     audit.record("ioc_database_loaded", {"counts": db.stats(), "sources": db.sources})
     log(f"    {len(db):,} indicators loaded: {db.stats()}")
 
+    prog.stage("rules")
     log("[*] Running detection rules (MITRE ATT&CK mapped) ...")
     ctx.findings = rules.run_all(ctx.artifacts, db)
+    prog.stage("yara")
     log("[*] YARA signature scan ...")
     try:
         ctx.findings += yara_scan.findings_from(ctx, yara_scan.scan(ctx))
     except Exception as exc:
         ctx.error("yara", exc)
     if ctx.external_tools:
+        prog.stage("external")
         log(f"[*] Running external open-source tools: {', '.join(ctx.external_tools)} ...")
         ctx.findings += external.run_enabled(ctx)
     ctx.findings = _renumber(ctx.findings)
     ended = utc_now()
     audit.record("analysis_completed", {"findings": len(ctx.findings), "errors": len(ctx.errors)})
 
+    prog.stage("reports")
     log("[*] Building remediation PLAN (proposal only - nothing is executed) ...")
     plan = build_plan(case.case_id, ctx.findings, min_remediation_severity)
     log("[*] Writing reports ...")
@@ -125,21 +137,56 @@ def run_scan(case: CaseInfo, output: str, profile: str = "standard", paths=None,
     for name, csv_text in builder.investigation_csvs(ctx).items():
         store.save_text(name, csv_text, subdir=os.path.join(rd, "investigation"), ext=".csv")
     html_path = os.path.join(case_dir, html_rec["path"])
+    prog.stage("pdf")
     pdf_path = _pdf(html_path, log) if pdf else None
     if pdf_path:
         audit.record("pdf_rendered", {"file": os.path.relpath(pdf_path, case_dir)})
 
+    prog.stage("document")
+    log("[*] Creating case documentation (Word + Markdown) ...")
+    doc_path = None
+    try:
+        docx_bytes, md_text = case_doc.build_case_document(data, tl)
+        doc_name = f"Case_Documentation_{safe_name(case.case_id)}"
+        rec = store.save_bytes(doc_name, docx_bytes, subdir=rd, ext=".docx")
+        store.save_text(doc_name, md_text, subdir=rd, ext=".md")
+        doc_path = os.path.join(case_dir, rec["path"])
+        audit.record("case_document_created", {"file": rec["path"], "sha256": rec["sha256"]})
+    except Exception as exc:
+        ctx.error("case_documentation", exc)
+        log(f"    [!] case documentation: {exc}")
+
+    prog.stage("seal")
     audit.record("case_sealing", {"note": "SHA256SUMS manifest is computed over every file after this entry"})
     digest = store.build_manifest()
     store.lock_all()
     sig = _sign(case_dir, sign_key, log) if sign_key else None
+    prog.finish("Complete - evidence sealed")
 
     v = data["verdict"]
-    summary = {"case_dir": case_dir, "report_html": html_path, "report_pdf": pdf_path, "verdict": v["verdict"],
+    summary = {"case_dir": case_dir, "report_html": html_path, "report_pdf": pdf_path, "case_document": doc_path, "verdict": v["verdict"],
                "counts": v["counts"], "manifest_sha256": digest, "signature": sig,
                "findings": [{"id": f["id"], "severity": f["severity"], "title": f["title"]} for f in ctx.findings],
                "plan_sha256": plan["plan_sha256"], "planned_actions": len(plan["actions"])}
     return {"summary": summary, "plan": plan}
+
+
+def _stages(offline: bool, mac: bool, external_tools: bool, pdf: bool) -> list:
+    """(key, label, weight) - weights approximate relative duration."""
+    if offline:
+        collect = [("system", "Reading evidence volume identity", 1), ("persistence", "Startup items on the volume", 2),
+                   ("filesystem", "Scanning & hashing files", 12)]
+    else:
+        collect = [("system", "Host identity & security settings", 2), ("processes", "Running processes", 2),
+                   ("network", "Network connections", 2), ("accounts", "User accounts & logins", 2),
+                   ("persistence", "Startup items / persistence", 3), ("filesystem", "Scanning & hashing files", 15),
+                   ("logs", "Security logs & shell history", 4), ("software", "Installed software", 2)]
+    return collect + [
+        ("macos", "Mac investigation (mail, messages, usage, logs)", 45 if mac else 0),
+        ("ioc", "Loading threat intelligence", 2), ("rules", "Running detection rules", 2),
+        ("yara", "YARA malware signatures", 8), ("external", "External security tools", 10 if external_tools else 0),
+        ("reports", "Writing reports", 3), ("pdf", "Rendering PDF", 3 if pdf else 0),
+        ("document", "Creating case documentation", 2), ("seal", "Sealing evidence (SHA-256)", 2)]
 
 
 def _renumber(findings: list) -> list:
