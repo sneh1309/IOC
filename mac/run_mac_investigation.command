@@ -83,9 +83,27 @@ read -r -p "  Client / device owner name    : " CLIENT
 read -r -p "  Organization                  : " ORG
 read -r -p "  Evidence item (model, serial) : " ITEM
 echo
-echo "  Watch list: e-mail addresses, names or phone numbers to search for in"
-echo "  Mail, Messages and browser history. Separate several with commas."
-read -r -p "  Watch for                     : " WATCH
+bold "E-mail addresses (these drive the answers - please read carefully)"
+echo
+echo "  A) OWNER'S e-mail address(es): the address(es) the OWNER of this Mac uses"
+echo "     (e.g. their Hotmail/Outlook, Gmail, iCloud). The report then flags every"
+echo "     e-mail account on this Mac that is NOT the owner's."
+echo "     Example:  owner.name@hotmail.com, owner.name@gmail.com"
+read -r -p "     Owner e-mail(s)   : " OWNER_EMAILS
+echo
+echo "  B) SUSPECT / DESTINATION e-mail address(es): the address that e-mails were"
+echo "     being FORWARDED TO, or the other person's own e-mail address."
+echo "     The report shows every e-mail sent/forwarded to it, rules, logins and"
+echo "     any trace of it on this Mac."
+echo "     Example:  someone@hotmail.com"
+read -r -p "     Suspect e-mail(s) : " SUSPECT_EMAILS
+echo
+echo "  C) OTHER search terms (optional): the other person's name, phone number,"
+echo "     nickname - searched in Messages contacts, Mail and browser history."
+echo "     Example:  Jane Smith, 705-555-0100"
+read -r -p "     Other terms       : " OTHER_TERMS
+WATCH="$SUSPECT_EMAILS"
+if [ -n "$OTHER_TERMS" ]; then WATCH="${WATCH:+$WATCH,}$OTHER_TERMS"; fi
 echo
 echo "  DATE RANGE - examining only the dates you care about is MUCH faster."
 echo "  Use the format YYYY-MM-DD (e.g. 2026-10-01). Dates are this Mac's local dates."
@@ -141,6 +159,7 @@ ARGS=(scan --examiner "$EXAMINER" --profile standard --days "$DAYS" --output "$O
 [ -n "$ORG" ]    && ARGS+=(--org "$ORG")
 [ -n "$ITEM" ]   && ARGS+=(--evidence-item "$ITEM")
 [ -n "$WATCH" ]  && ARGS+=(--watch "$WATCH")
+[ -n "$OWNER_EMAILS" ] && ARGS+=(--owner-email "$OWNER_EMAILS")
 [ -n "$FROM_DATE" ] && ARGS+=(--from "$FROM_DATE")
 [ -n "$TO_DATE" ]   && ARGS+=(--to "$TO_DATE")
 case "$CONTENT" in y|Y) ARGS+=(--include-content) ;; esac

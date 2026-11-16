@@ -136,6 +136,48 @@ def build(root: str) -> dict:
         "LeaseStartDate": dt.datetime.fromtimestamp(NOW - 12 * day), "RouterHardwareAddress": b"\x11\x22\x33\x44\x55\x66"})
     _plist(os.path.join(home, "Library/Preferences/MobileMeAccounts.plist"), {"Accounts": [
         {"AccountID": "owner@example.com", "DisplayName": "Owner", "Services": [{"Name": "MESSAGES", "Enabled": True}]}]})
+    # ---------------- e-mail accounts: Internet Accounts (incl. a DELETED row), Chrome sign-in + saved login,
+    #                  Thunderbird, a leftover Apple Mail folder of a removed account, webmail history
+    acc_db = os.path.join(home, "Library/Accounts/Accounts4.sqlite")
+    _db(acc_db, """
+        CREATE TABLE ZACCOUNTTYPE (Z_PK INTEGER PRIMARY KEY, ZACCOUNTTYPEDESCRIPTION TEXT, ZIDENTIFIER TEXT);
+        CREATE TABLE ZACCOUNT (Z_PK INTEGER PRIMARY KEY, ZACCOUNTTYPE INTEGER, ZUSERNAME TEXT, ZACCOUNTDESCRIPTION TEXT,
+            ZDATE REAL, ZIDENTIFIER TEXT, ZACTIVE INTEGER, ZOWNINGBUNDLEID TEXT);
+    """, [("INSERT INTO ZACCOUNTTYPE VALUES (?,?,?)", [(1, "iCloud", "com.apple.account.AppleAccount"),
+                                                     (2, "Google", "com.apple.account.Google")]),
+          ("INSERT INTO ZACCOUNT VALUES (?,?,?,?,?,?,?,?)", [
+              (1, 1, "owner@example.com", "iCloud", NOW - 500 * day - MAC_EPOCH, "11111111-1111-1111-1111-111111111111", 1, ""),
+              (2, 2, "other.person@example.org", "Gmail", NOW - 25 * day - MAC_EPOCH, "22222222-2222-2222-2222-222222222222", 1, ""),
+              (3, 2, "removed.account@example.org", "Gmail", NOW - 60 * day - MAC_EPOCH, "33333333-3333-3333-3333-333333333333", 1, "")])])
+    c = sqlite3.connect(acc_db)
+    c.execute("PRAGMA secure_delete=OFF")
+    c.execute("DELETE FROM ZACCOUNT WHERE Z_PK = 3")   # removed account - bytes survive in the free page
+    c.commit()
+    c.close()
+    gone = os.path.join(home, "Library/Mail/V10/44444444-4444-4444-4444-444444444444/INBOX.mbox/Messages")
+    os.makedirs(gone, exist_ok=True)
+    with open(os.path.join(gone, "1.emlx"), "w") as fh:
+        fh.write("512\nDelivered-To: gone.mailbox@example.org\nTo: gone.mailbox@example.org\nSubject: hi\n\nbody\n")
+    chrome = os.path.join(home, "Library/Application Support/Google/Chrome/Default")
+    with open(os.path.join(chrome, "Preferences"), "w") as fh:
+        fh.write('{"account_info": [{"email": "other.person@example.org", "full_name": "Other Person"}]}')
+    _db(os.path.join(chrome, "Login Data"), """
+        CREATE TABLE logins (origin_url TEXT, username_value TEXT, password_value BLOB, date_created INTEGER,
+            date_last_used INTEGER, times_used INTEGER);
+    """, [("INSERT INTO logins VALUES (?,?,?,?,?,?)", [
+        ("https://login.live.com/", WATCHED, b"\x00ENCRYPTED", int((NOW - 31 * day + 11644473600) * 1e6),
+         int((NOW - 2 * day + 11644473600) * 1e6), 7)])])
+    tb = os.path.join(home, "Library/Thunderbird/Profiles/abcd.default")
+    os.makedirs(tb, exist_ok=True)
+    with open(os.path.join(tb, "prefs.js"), "w") as fh:
+        fh.write('user_pref("mail.identity.id1.useremail", "tb.user@example.org");\n')
+    c = sqlite3.connect(os.path.join(home, "Library/Safari/History.db"))
+    c.executemany("INSERT INTO history_items VALUES (?,?)", [(3, "https://mail.google.com/mail/u/0/#inbox"),
+                                                             (4, "https://accounts.google.com/v3/signin/identifier")])
+    c.executemany("INSERT INTO history_visits VALUES (?,?,?,?)", [(3, 3, NOW - 24 * day - MAC_EPOCH, "Gmail"),
+                                                                  (4, 4, NOW - 25 * day - MAC_EPOCH, "Sign in")])
+    c.commit()
+    c.close()
     # recent user file
     os.makedirs(os.path.join(home, "Documents"), exist_ok=True)
     with open(os.path.join(home, "Documents", "notes.txt"), "w") as fh:

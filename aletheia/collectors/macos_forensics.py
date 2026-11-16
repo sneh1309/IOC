@@ -84,6 +84,10 @@ UNIFIED_LOG_QUERIES = {
                 '"receiv" OR eventMessage CONTAINS[c] "send" OR eventMessage CONTAINS[c] "transfer")'),
     "boot_shutdown": ('eventMessage CONTAINS "BOOT_TIME" OR eventMessage CONTAINS "SHUTDOWN_TIME" OR '
                       '(process == "kernel" AND eventMessage CONTAINS "Previous shutdown cause")'),
+    "account_changes": ('(process == "accountsd" OR subsystem == "com.apple.accounts") AND '
+                        '(eventMessage CONTAINS[c] "remov" OR eventMessage CONTAINS[c] "delet" OR '
+                        'eventMessage CONTAINS[c] "added account" OR eventMessage CONTAINS[c] "saveAccount" OR '
+                        'eventMessage CONTAINS[c] "insert")'),
     "tamper_indicators": ('(process == "log" AND eventMessage CONTAINS[c] "erase") OR '
                           'eventMessage CONTAINS[c] "settimeofday" OR (process == "tccutil")'),
 }
@@ -149,6 +153,14 @@ def parse_day(text: str, end_of_day: bool = False) -> _dt.datetime:
     return d.astimezone()
 
 
+def read_text_safe(path: str, max_bytes: int = 4 * 1024 * 1024) -> str:
+    try:
+        with open_readonly(path) as fh:
+            return fh.read(max_bytes).decode("utf-8", "replace")
+    except OSError:
+        return ""
+
+
 def read_plist(path: str):
     try:
         with open_readonly(path) as fh:
@@ -177,13 +189,310 @@ def plist_text(obj) -> str:
 
 
 def matches(text, watch: list) -> list:
+    """Watched terms found in text. Phone numbers match on digits only (705-555-0100 == +17055550100)."""
     low = (text or "").lower()
-    return [w for w in watch if w and w in low]
+    digits = None
+    hits = []
+    for w in watch:
+        if not w:
+            continue
+        if w in low:
+            hits.append(w)
+            continue
+        wd = re.sub(r"\D", "", w)
+        if len(wd) >= 7 and len(wd) >= len(w.replace(" ", "")) - 4:   # looks like a phone number
+            digits = digits if digits is not None else re.sub(r"\D", "", low)
+            if wd[-10:] in digits:
+                hits.append(w)
+    return hits
 
 
-class Investigator:
+WEBMAIL = {
+    "Outlook.com / Hotmail": re.compile(r"outlook\.live\.com|hotmail\.com|outlook\.com/(mail|owa)", re.I),
+    "Microsoft 365 (work Outlook)": re.compile(r"outlook\.office(365)?\.com|outlook\.cloud\.microsoft", re.I),
+    "Gmail": re.compile(r"mail\.google\.com", re.I),
+    "Yahoo Mail": re.compile(r"mail\.yahoo\.com", re.I),
+    "iCloud Mail": re.compile(r"icloud\.com/(mail|#mail)", re.I),
+    "Proton Mail": re.compile(r"mail\.proton\.me|protonmail\.com", re.I),
+    "AOL Mail": re.compile(r"mail\.aol\.com", re.I),
+    "GMX / Mail.com": re.compile(r"(gmx|mail)\.com/.*mail|navigator\.gmx", re.I),
+    "Zoho Mail": re.compile(r"mail\.zoho\.", re.I),
+}
+SIGNIN_URL = re.compile(r"(accounts\.google\.com/.*(signin|ServiceLogin|AddSession|SignOutOptions|Logout)|"
+                        r"login\.(live|microsoftonline)\.com|login\.yahoo\.com|appleid\.apple\.com/sign|"
+                        r"account\.proton\.me/(login|switch)|/logout|signout|sign-out|logoff)", re.I)
+MAIL_SERVER = re.compile(r"(imap|smtp|pop|mail|outlook|office365|exchange|gmail|google|yahoo|icloud|me\.com|"
+                         r"hotmail|live\.com|proton|zoho|aol|gmx)", re.I)
+EMAIL_BYTES = re.compile(rb"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,120}\.[A-Za-z]{2,12}")
+UUID_RE = re.compile(r"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$", re.I)
+NOISE_ADDR = re.compile(r"(noreply|no-reply|donotreply|mailer-daemon|postmaster|"
+                        r"@(apple|icloud)\.com$|@localhost|\.(png|jpg|gif)$)", re.I)
+
+
+class _EmailMixin:
+    """Which e-mail accounts are / were signed in on this Mac (all apps, browsers, removed ones)."""
+
+    def email_accounts(self, home: str) -> dict:
+        user = os.path.basename(home)
+        out = {"accounts": [], "mail_app_accounts": [], "browser_accounts": [], "saved_logins": [],
+               "webmail_usage": [], "signin_pages": [], "removed_traces": [], "other_app_hits": []}
+        live_ids, live_addrs = set(), set()
+
+        # 1) macOS Internet Accounts (Settings > Internet Accounts) - used by Mail, Calendar, Notes ...
+        for f in sorted(glob.glob(os.path.join(home, "Library/Accounts/Accounts*.sqlite"))):
+            conn = self.open_db(f, f"{user}_internet_accounts")
+            if not conn:
+                continue
+            ac = self.cols(conn, "ZACCOUNT")
+            tc = self.cols(conn, "ZACCOUNTTYPE")
+            sel = ["a.Z_PK pk"] + [f"a.{c} {c.lower()}" for c in ("ZUSERNAME", "ZACCOUNTDESCRIPTION", "ZDATE",
+                                                                   "ZIDENTIFIER", "ZACTIVE", "ZOWNINGBUNDLEID") if c in ac]
+            join = ""
+            if "ZACCOUNTTYPE" in ac and "ZACCOUNTTYPEDESCRIPTION" in tc:
+                sel.append("t.ZACCOUNTTYPEDESCRIPTION ztype")
+                join = " LEFT JOIN ZACCOUNTTYPE t ON a.ZACCOUNTTYPE = t.Z_PK"
+            for r in self.q(conn, f"SELECT {', '.join(sel)} FROM ZACCOUNT a{join}"):
+                name = r.get("zusername") or ""
+                if not name and not r.get("zaccountdescription"):
+                    continue
+                ts = mac_time(r.get("zdate"))
+                out["accounts"].append({"source": "macOS Internet Accounts", "account": name,
+                                        "description": r.get("zaccountdescription"), "type": r.get("ztype"),
+                                        "added": fmt(ts), "_ts": ts, "status": "active" if r.get("zactive", 1) else "inactive"})
+                if r.get("zidentifier"):
+                    live_ids.add(str(r["zidentifier"]).upper())
+                if "@" in name:
+                    live_addrs.add(name.lower())
+            conn.close()
+            self._carve(f, "macOS Internet Accounts database (incl. deleted pages / journal)", out, live_addrs)
+
+        # 2) Apple Mail: accounts referenced by mailboxes + leftover folders of removed accounts
+        mail_dirs = sorted(glob.glob(os.path.join(home, "Library/Mail/V*")))
+        if mail_dirs:
+            vdir = mail_dirs[-1]
+            for acc in (self.inv["users"].get(user, {}).get("mail", {}) or {}).get("mailbox_accounts", []):
+                out["mail_app_accounts"].append(acc)
+                if acc.get("account_id"):
+                    live_ids.add(acc["account_id"].upper())
+                if "@" in (acc.get("account") or ""):
+                    live_addrs.add(acc["account"].lower())
+            try:
+                entries = list(os.scandir(vdir))
+            except OSError as exc:
+                self.problem(vdir, exc)
+                entries = []
+            for e in entries:
+                if not (e.is_dir(follow_symlinks=False) and UUID_RE.match(e.name)):
+                    continue
+                if e.name.upper() in live_ids:
+                    continue
+                found = self._addresses_in_emlx(e.path)
+                st = safe_stat(e.path) or {}
+                out["removed_traces"].append({
+                    "evidence": "Apple Mail folder of an account that is no longer configured",
+                    "account": ", ".join(found[:5]) or "(address not found in sample)", "location": e.path,
+                    "last_modified": st.get("mtime"), "detail": f"{self._count_emlx(e.path)} stored e-mail file(s)"})
+
+        # 3) Outlook for Mac (legacy profile database) + New Outlook data
+        for db in glob.glob(os.path.join(home, "Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/*/Data/Outlook.sqlite")):
+            prof = db.split("Outlook 15 Profiles/")[1].split("/")[0]
+            conn = self.open_db(db, f"{user}_outlook_{prof}")
+            if not conn:
+                continue
+            for t in [r["name"] for r in self.q(conn, "SELECT name FROM sqlite_master WHERE type='table'")]:
+                if "account" not in t.lower():
+                    continue
+                for r in self.q(conn, f'SELECT * FROM "{t}" LIMIT 500'):
+                    addrs = sorted({a for v in r.values() if isinstance(v, str) for a in EMAIL_RE.findall(v)})
+                    for a in addrs:
+                        out["accounts"].append({"source": f"Outlook for Mac (profile '{prof}')", "account": a,
+                                                "description": t, "type": "Outlook", "added": None, "status": "configured"})
+                        live_addrs.add(a.lower())
+            conn.close()
+            self._carve(db, f"Outlook for Mac database '{prof}' (incl. journal)", out, live_addrs, limit_mb=64)
+        hx = glob.glob(os.path.join(home, "Library/Containers/com.microsoft.Outlook/Data/Library/Application Support/"
+                                          "Microsoft/Outlook/*/HxStore.hxd")) + \
+            glob.glob(os.path.join(home, "Library/Group Containers/UBF8T346G9.Office/Outlook/Outlook 15 Profiles/*/HxStore.hxd"))
+        for h in hx:
+            st = safe_stat(h) or {}
+            out["accounts"].append({"source": "New Outlook for Mac (cloud store)", "account": "(see browser / keychain tables)",
+                                    "description": h, "type": "Outlook", "added": st.get("birthtime"), "status": "data present"})
+
+        # 4) Thunderbird
+        for prefs in glob.glob(os.path.join(home, "Library/Thunderbird/Profiles/*/prefs.js")):
+            text = read_text_safe(prefs)
+            for m in re.finditer(r'user_pref\("mail\.(identity\.\w+\.useremail|server\.\w+\.userName)",\s*"([^"]+)"\)', text):
+                out["accounts"].append({"source": "Thunderbird", "account": m.group(2), "description": m.group(1),
+                                        "type": "Thunderbird", "added": None, "status": "configured"})
+                live_addrs.add(m.group(2).lower())
+
+        # 5) Browsers: signed-in Google/Microsoft profiles, saved logins (usernames only), webmail use
+        for name, rel in (("Chrome", "Google/Chrome"), ("Edge", "Microsoft Edge"), ("Brave", "BraveSoftware/Brave-Browser"),
+                          ("Vivaldi", "Vivaldi"), ("Opera", "com.operasoftware.Opera"), ("Arc", "Arc/User Data")):
+            base = os.path.join(home, "Library/Application Support", rel)
+            for pref in glob.glob(os.path.join(base, "*", "Preferences")):
+                prof = os.path.basename(os.path.dirname(pref))
+                try:
+                    import json as _json
+                    data = _json.loads(read_text_safe(pref) or "{}")
+                except ValueError:
+                    data = {}
+                for a in data.get("account_info", []) or []:
+                    if a.get("email"):
+                        out["browser_accounts"].append({"browser": f"{name} ({prof})", "account": a["email"],
+                                                        "name": a.get("full_name"), "how": "signed in to browser profile"})
+                        live_addrs.add(a["email"].lower())
+            for ld in glob.glob(os.path.join(base, "*", "Login Data")):
+                prof = os.path.basename(os.path.dirname(ld))
+                conn = self.open_db(ld, f"{user}_{name}_{prof}_saved_logins")
+                if not conn:
+                    continue
+                c = self.cols(conn, "logins")
+                extra = ", ".join(x for x in ("date_created", "date_last_used", "times_used") if x in c)
+                for r in self.q(conn, f"SELECT origin_url, username_value{', ' + extra if extra else ''} FROM logins"):
+                    u = r.get("username_value") or ""
+                    if not u:
+                        continue
+                    created = chrome_time(r.get("date_created"))
+                    used = chrome_time(r.get("date_last_used"))
+                    out["saved_logins"].append({"browser": f"{name} ({prof})", "website": r.get("origin_url"), "username": u,
+                                                "saved": fmt(created), "last_used": fmt(used), "times_used": r.get("times_used"),
+                                                "_ts": used or created, "email_related": bool(MAIL_SERVER.search(r.get("origin_url") or ""))})
+                conn.close()
+        fx = glob.glob(os.path.join(home, "Library/Application Support/Firefox/Profiles/*/signedInUser.json"))
+        for f in fx:
+            m = EMAIL_RE.search(read_text_safe(f))
+            if m:
+                out["browser_accounts"].append({"browser": "Firefox", "account": m.group(0), "name": "",
+                                                "how": "signed in to Firefox account"})
+        hist = (self.inv["users"].get(user, {}).get("browsers") or {}).get("history", [])
+        per: dict = {}
+        for h in hist:
+            url = h.get("url") or ""
+            for svc, rx in WEBMAIL.items():
+                if rx.search(url):
+                    d = per.setdefault((svc, h["browser"]), {"service": svc, "browser": h["browser"], "visits": 0,
+                                                            "first": h.get("_ts"), "last": h.get("_ts")})
+                    d["visits"] += 1
+                    if h.get("_ts"):
+                        d["first"] = min(d["first"] or h["_ts"], h["_ts"])
+                        d["last"] = max(d["last"] or 0, h["_ts"])
+                    break
+            if SIGNIN_URL.search(url):
+                out["signin_pages"].append({**h, "action": "sign-out" if re.search(r"logout|signout|sign-out|logoff",
+                                                                                     url, re.I) else "sign-in"})
+            for a in EMAIL_RE.findall(url.replace("%40", "@")):
+                if MAIL_SERVER.search(url):
+                    out["signin_pages"].append({**h, "action": f"account in URL: {a}"})
+        out["webmail_usage"] = sorted(({**v, "first": fmt(v["first"]), "last": fmt(v["last"])} for v in per.values()),
+                                      key=lambda x: -x["visits"])
+
+        # 6) Keychain: which mail servers / accounts have stored credentials (metadata only - never passwords)
+        kc = os.path.join(home, "Library/Keychains/login.keychain-db")
+        if self.live and os.path.exists(kc):
+            txt = self.run(["security", "dump-keychain", kc], f"{user}_keychain_metadata", 120)
+            for block in txt.split("keychain: ")[1:]:
+                cls = re.search(r'class: "?(\w+)"?', block)
+                acct = re.search(r'"acct"<blob>="([^"]*)"', block)
+                srvr = re.search(r'"srvr"<blob>="([^"]*)"', block) or re.search(r'"svce"<blob>="([^"]*)"', block)
+                mdat = re.search(r'"mdat"<timedate>=0x[0-9A-F]+\s+"(\d{14})', block)
+                if not acct or not acct.group(1):
+                    continue
+                server = srvr.group(1) if srvr else ""
+                if "@" in acct.group(1) or MAIL_SERVER.search(server):
+                    out["accounts"].append({"source": "Keychain (saved credential - password NOT read)",
+                                            "account": acct.group(1), "description": server,
+                                            "type": cls.group(1) if cls else "", "status": "credential stored",
+                                            "added": None, "modified": (mdat.group(1) if mdat else None)})
+                    if "@" in acct.group(1):
+                        live_addrs.add(acct.group(1).lower())
+
+        # 7) Other preserved databases that mention the watched terms (Outlook, Spark, etc.)
+        out["other_app_hits"] = self._watch_search_dbs(user)
+        for r in out["removed_traces"]:
+            for a in EMAIL_RE.findall(r.get("account") or ""):
+                live_addrs.discard(a.lower())
+        out["all_addresses"] = sorted(live_addrs)
+        return out
+
+    # ---------------------------------------------------------------- helpers
+    def _carve(self, path: str, what: str, out: dict, live_addrs: set, limit_mb: int = 32) -> None:
+        """Find e-mail addresses in the RAW bytes of a database and its journal (deleted rows often survive in
+        free pages / WAL). Addresses not present in the live records are reported as possibly removed."""
+        found: dict = {}
+        for f in (path, path + "-wal", path + "-journal"):
+            if not os.path.isfile(f):
+                continue
+            try:
+                with open_readonly(f) as fh:
+                    data = fh.read(limit_mb * 1024 * 1024)
+            except OSError:
+                continue
+            for m in EMAIL_BYTES.findall(data):
+                a = m.decode("ascii", "ignore").lower().strip(".")
+                if not NOISE_ADDR.search(a):
+                    found.setdefault(a, os.path.basename(f))
+        for a, src in sorted(found.items()):
+            if a not in live_addrs and not any(a in x for x in live_addrs):
+                out["removed_traces"].append({"evidence": f"Address found only in deleted/old data of the {what}",
+                                              "account": a, "location": f"{path} ({src})", "last_modified": None,
+                                              "detail": "not present in the current account list - possibly a removed account"})
+
+    def _emlx_files(self, folder: str, limit: int):
+        n = 0
+        for dp, _dn, fs in os.walk(folder):
+            for f in fs:
+                if f.endswith(".emlx"):
+                    yield os.path.join(dp, f)
+                    n += 1
+                    if n >= limit:
+                        return
+
+    def _count_emlx(self, folder: str) -> int:
+        return sum(1 for _ in self._emlx_files(folder, 200000))
+
+    def _addresses_in_emlx(self, folder: str) -> list:
+        """Identify a removed Mail account by the delivery headers of a few stored messages (read-only)."""
+        counts: dict = {}
+        for f in self._emlx_files(folder, 60):
+            head = read_text_safe(f, 16384)
+            for hdr in re.findall(r"^(?:Delivered-To|X-Original-To|To):\s*(.+)$", head, re.M | re.I):
+                for a in EMAIL_RE.findall(hdr):
+                    counts[a.lower()] = counts.get(a.lower(), 0) + 1
+        return [a for a, _n in sorted(counts.items(), key=lambda x: -x[1])]
+
+    def _watch_search_dbs(self, user: str) -> list:
+        hits = []
+        if not self.watch:
+            return hits
+        for label, path in list(getattr(self, "_dbs", [])):
+            if not label.startswith(user + "_") or "messages_chat" in label:
+                continue  # Messages handled separately (content is opt-in)
+            try:
+                conn = sqlite3.connect(path)
+            except sqlite3.Error:
+                continue
+            try:
+                tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
+                for t in tables:
+                    cols = [r[1] for r in conn.execute(f'PRAGMA table_info("{t}")') if (r[2] or "").upper() in ("TEXT", "", "VARCHAR")]
+                    for c in cols[:40]:
+                        for w in self.watch:
+                            for row in conn.execute(f'SELECT "{c}" FROM "{t}" WHERE "{c}" LIKE ? LIMIT 25', (f"%{w}%",)):
+                                hits.append({"database": label, "table": t, "field": c, "term": w,
+                                             "value": str(row[0])[:300]})
+                                if len(hits) > 2000:
+                                    return hits
+            except sqlite3.Error:
+                pass
+            finally:
+                conn.close()
+        return hits
+
+
+class Investigator(_EmailMixin):
     def __init__(self, ctx, root: str = "/", days: int = 90, watch=None, include_content: bool = False,
-                 date_from: Optional[str] = None, date_to: Optional[str] = None):
+                 date_from: Optional[str] = None, date_to: Optional[str] = None, owner_emails=None):
         self.ctx = ctx
         self.root = root
         self.live = os.path.abspath(root) == "/"
@@ -199,9 +508,10 @@ class Investigator:
         self.since, self.until = start.timestamp(), end.timestamp()
         self.watch = [w.strip().lower() for w in (watch or []) if w and w.strip()]
         self.include_content = include_content
+        self.owner_emails = [e.strip().lower() for e in (owner_emails or []) if e and e.strip()]
         self.work = os.path.join(ctx.case_dir, "_work")
         self.inv: dict = {"generated_utc": utc_now(), "mode": "live" if self.live else f"offline ({root})",
-                          "days": days, "watch": self.watch,
+                          "days": days, "watch": self.watch, "owner_emails": self.owner_emails,
                           "range": {"from": start.strftime("%Y-%m-%d %H:%M:%S %z"), "to": end.strftime("%Y-%m-%d %H:%M:%S %z"),
                                     "explicit": self.explicit_range,
                                     "label": (f"{start:%Y-%m-%d} to {end:%Y-%m-%d}" if self.explicit_range
@@ -268,6 +578,7 @@ class Investigator:
         try:
             conn = sqlite3.connect(os.path.join(wdir, os.path.basename(src)))
             conn.row_factory = sqlite3.Row
+            self._dbs = getattr(self, "_dbs", []) + [(label, os.path.join(wdir, os.path.basename(src)))]
             return conn
         except sqlite3.Error as exc:
             self.problem(src, exc)
@@ -327,6 +638,26 @@ class Investigator:
                                 FROM messages m LEFT JOIN subjects s ON m.subject = s.ROWID
                                 LEFT JOIN addresses a ON m.sender = a.ROWID
                                 LEFT JOIN mailboxes mb ON m.mailbox = mb.ROWID""")
+        out["mailbox_accounts"] = []
+        seen_acc: dict = {}
+        for r in self.q(conn, "SELECT mb.url url, (SELECT COUNT(*) FROM messages m WHERE m.mailbox = mb.ROWID) n "
+                              "FROM mailboxes mb"):
+            from urllib.parse import unquote, urlparse
+            u = urlparse(r.get("url") or "")
+            ident = unquote(u.netloc)
+            if UUID_RE.match(ident):
+                acct = "(account id " + ident[:8] + "...)"
+            elif ident.count("@") >= 2:          # user@domain@server
+                acct = ident.rsplit("@", 1)[0]
+            else:
+                acct = ident
+            key = (u.scheme, ident)
+            a = seen_acc.setdefault(key, {"protocol": u.scheme, "account": acct,
+                                          "account_id": ident if UUID_RE.match(ident) else "",
+                                          "mailboxes": 0, "messages": 0})
+            a["mailboxes"] += 1
+            a["messages"] += r.get("n") or 0
+        out["mailbox_accounts"] = list(seen_acc.values())
         rcpt: dict = {}
         for r in self.q(conn, "SELECT r.message, a.address, r.type FROM recipients r "
                               "JOIN addresses a ON r.address = a.ROWID"):
@@ -552,16 +883,7 @@ class Investigator:
         for a in acc.get("Accounts", []) if isinstance(acc, dict) else []:
             apple_ids.append({"apple_id": a.get("AccountID"), "name": a.get("DisplayName"),
                               "services_enabled": [s.get("Name") for s in a.get("Services", []) if s.get("Enabled")]})
-        internet_accounts = []
-        for f in glob.glob(os.path.join(home, "Library/Accounts/Accounts*.sqlite")):
-            conn = self.open_db(f, f"{os.path.basename(home)}_internet_accounts")
-            if conn:
-                internet_accounts = self.q(conn, "SELECT ZACCOUNTDESCRIPTION description, ZUSERNAME username, "
-                                                 "ZDATE created FROM ZACCOUNT")
-                for r in internet_accounts:
-                    r["created"] = fmt(mac_time(r.get("created")))
-                conn.close()
-        return {"apple_ids": apple_ids, "internet_accounts": internet_accounts,
+        return {"apple_ids": apple_ids,
                 "tcc": self.tcc(os.path.join(home, "Library/Application Support/com.apple.TCC/TCC.db"),
                                 f"{os.path.basename(home)}_user_TCC")}
 
@@ -766,7 +1088,7 @@ class Investigator:
         inv = self.inv
         homes = self.homes()
         # work units: 7 per user, 6 system sources, 4 per unified-log query (the slow part on a live Mac)
-        self._total = 7 * len(homes) + 6 + (4 * len(UNIFIED_LOG_QUERIES) if self.live else 0)
+        self._total = 8 * len(homes) + 6 + (4 * len(UNIFIED_LOG_QUERIES) if self.live else 0)
         self._done = 0.0
         labels = {"mail": "Mail", "messages": "Messages", "browsers": "browser history",
                   "downloads_quarantine": "downloads", "recent_files": "recent files", "accounts": "accounts & permissions"}
@@ -787,6 +1109,12 @@ class Investigator:
                                             f"{user}_knowledgeC")
             self._tick(1, f"user {user}: app usage done")
             inv["users"][user] = u
+            self._tick(0, f"user {user}: e-mail accounts (Mail, Outlook, Gmail, browsers, keychain, removed)")
+            try:
+                u["email_accounts"] = self.email_accounts(home)
+            except Exception as exc:
+                self.ctx.error(f"mac:{user}:email_accounts", exc)
+            self._tick(1, f"user {user}: e-mail accounts done")
         s = inv["system"]
         self.ctx.log("    - system: privacy permissions, installs, Wi-Fi/IP history, sharing, profiles ...")
         for key, fn in (("tcc", lambda: self.tcc(self.p("Library/Application Support/com.apple.TCC/TCC.db"), "system_TCC")),
@@ -844,6 +1172,10 @@ def build_questions(inv: dict) -> list:
     a.append(f"Watched: {W}.")
     a.append(f"{len(sent_to)} message(s) in Apple Mail were sent/forwarded TO a watched address"
              + (f" - first {first}, most recent {last}." if first else "."))
+    oh = [x for d in users.values() for x in (d.get("email_accounts") or {}).get("other_app_hits", [])]
+    if oh:
+        a.append(f"{len(oh)} match(es) for watched terms in other e-mail apps/databases (Outlook, browsers ...) - "
+                 "see Q10.")
     a.append(f"{len(fwd_rules)} Apple Mail rule(s) forward/redirect mail or reference a watched address."
              if rules else "No Apple Mail rules found on this Mac.")
     if settings:
@@ -1008,6 +1340,51 @@ def build_questions(inv: dict) -> list:
               "tables": {"Tamper indicators": _t(tamper, ["date", "process", "message"]),
                          "Boot / shutdown events": _t(ul.get("boot_shutdown", []), ["date", "process", "message"]),
                          "Collection access problems": _t(inv.get("access_problems", []), ["path", "error"])}})
+
+    # Q10 e-mail accounts on this Mac (current and removed)
+    owner = inv.get("owner_emails") or []
+    accs, mailapp, brows, logins, webmail, signins, removed, other = [], [], [], [], [], [], [], []
+    for u, d in users.items():
+        e = d.get("email_accounts") or {}
+        accs += [{**x, "user": u} for x in e.get("accounts", [])]
+        mailapp += [{**x, "user": u} for x in e.get("mail_app_accounts", [])]
+        brows += [{**x, "user": u} for x in e.get("browser_accounts", [])]
+        logins += [{**x, "user": u} for x in e.get("saved_logins", [])]
+        webmail += [{**x, "user": u} for x in e.get("webmail_usage", [])]
+        signins += [{**x, "user": u} for x in e.get("signin_pages", [])]
+        removed += [{**x, "user": u} for x in e.get("removed_traces", [])]
+        other += [{**x, "user": u} for x in e.get("other_app_hits", [])]
+    addr = sorted({a.lower() for r in accs + mailapp + brows for a in EMAIL_RE.findall(str(r.get("account") or ""))}
+                  | {r["username"].lower() for r in logins if "@" in (r.get("username") or "") and r.get("email_related")})
+    not_owner = [a for a in addr if owner and a not in owner]
+    watched_acc = [a for a in addr if any(w in a for w in watch)]
+    acct_log = ul.get("account_changes", [])
+    a = [f"{len(addr)} distinct e-mail address(es) are signed in or have saved credentials on this Mac: "
+         + (", ".join(addr[:15]) + (" ..." if len(addr) > 15 else "") if addr else "none found") + ".",
+         ("Accounts that are NOT the owner's (" + ", ".join(owner) + "): " + (", ".join(not_owner) or "none") + ".")
+         if owner else "Owner e-mail not given - enter it next time so the report can flag accounts that are not the owner's.",
+         ("WATCHED address signed in / saved on this Mac: " + ", ".join(watched_acc) + ".") if watched_acc else
+         "No watched address is signed in or saved as an account on this Mac.",
+         "Webmail use from browsers: " + ("; ".join(f"{w['service']} ({w['browser']}): {w['visits']} visit(s), "
+                                                      f"last {w['last']}" for w in webmail[:6]) or "none") + ".",
+         f"{len(removed)} trace(s) of accounts that were REMOVED or exist only in deleted/old data; "
+         f"{len(acct_log)} account add/remove event(s) in the system log.",
+         "Covers: macOS Internet Accounts, Apple Mail (all accounts in it - iCloud, Outlook, Gmail ...), Outlook for "
+         "Mac, Thunderbird, Chrome/Edge/Brave/Firefox sign-ins and saved logins (usernames only), webmail history, "
+         "and Keychain entries (names only - passwords are never read)."]
+    Q.append({"id": "Q10", "question": "Which e-mail accounts are (or were) signed in on this Mac - Outlook, Gmail, "
+                                       "iCloud and others - including removed ones?", "answer": a, "tables": {
+        "E-mail accounts on this Mac": _t(accs, ["account", "source", "type", "description", "added", "status", "user"]),
+        "Accounts used by Apple Mail": _t(mailapp, ["account", "protocol", "mailboxes", "messages", "user"]),
+        "Browser profiles signed in": _t(brows, ["account", "browser", "name", "how", "user"]),
+        "Saved website logins (usernames only)": _t(sorted(logins, key=lambda x: x.get("_ts") or 0, reverse=True),
+                                                    ["website", "username", "saved", "last_used", "times_used", "browser", "user"]),
+        "Webmail use from browsers": _t(webmail, ["service", "browser", "visits", "first", "last", "user"]),
+        "Webmail sign-in / sign-out pages": _t(sorted(signins, key=lambda x: x.get("_ts") or 0, reverse=True),
+                                               ["date", "action", "browser", "url", "user"]),
+        "Removed / previously used accounts (traces)": _t(removed, ["account", "evidence", "detail", "last_modified", "location", "user"]),
+        "Account add/remove events (system log)": _t(acct_log, ["date", "process", "message"]),
+        "Other e-mail apps / databases mentioning watched terms": _t(other, ["term", "database", "table", "field", "value", "user"])}})
     return Q
 
 
@@ -1015,7 +1392,8 @@ def collect(ctx) -> None:
     opt = ctx.options
     inv = Investigator(ctx, root=opt.get("mac_root") or "/", days=int(opt.get("days") or 90),
                        watch=opt.get("watch") or [], include_content=bool(opt.get("include_content")),
-                       date_from=opt.get("date_from"), date_to=opt.get("date_to")).collect()
+                       date_from=opt.get("date_from"), date_to=opt.get("date_to"),
+                       owner_emails=opt.get("owner_emails") or []).collect()
     ctx.add_artifact("mac_investigation", inv, "macOS investigation: mail, messages, usage, networks, spyware, remote access")
 
 

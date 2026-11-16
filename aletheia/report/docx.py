@@ -214,7 +214,8 @@ def build_case_document(data: dict, timeline: list) -> tuple:
             ("Examination window (UTC)", f"{acq['started_utc']}  to  {acq['ended_utc']}"),
             ("Mode", f"{acq['mode']}, profile {acq['profile']}" + (f", {inv.get('mode')}" if inv else "")),
             ("Period examined", rng.get("label") or "n/a"),
-            ("Watched terms", ", ".join((inv or {}).get("watch") or []) or "none"),
+            ("Owner e-mail(s)", ", ".join((inv or {}).get("owner_emails") or []) or "not given"),
+            ("Watched terms (suspect e-mail, names ...)", ", ".join((inv or {}).get("watch") or []) or "none"),
             ("Tool", f"Aletheia v{tool['version']} (build SHA-256 {tool['build_sha256']})")]
     d.heading("1. Case information")
     d.kv(info)

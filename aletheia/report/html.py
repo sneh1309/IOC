@@ -121,7 +121,8 @@ def render(data: dict, timeline: list) -> str:
         out.append(f"<p class='muted'>macOS investigation ({E(str(inv.get('mode')))}), period "
                    f"<b>{E((inv.get('range') or {}).get('label') or str(inv.get('days')) + ' days')}</b> (dated records outside this "
                    "period are excluded; current settings, installed apps and permissions are always shown); watched terms: "
-                   f"<b>{E(', '.join(inv.get('watch') or []) or 'none')}</b>. Times in this section are the "
+                   f"<b>{E(', '.join(inv.get('watch') or []) or 'none')}</b>; owner e-mail(s): "
+                   f"<b>{E(', '.join(inv.get('owner_emails') or []) or 'not given')}</b>. Times in this section are the "
                    "<b>local time of the examined Mac</b> with UTC offset. Every database used was preserved "
                    "byte-for-byte under <code>evidence/databases/</code> (SHA-256 below) and analysed only as a copy; "
                    "complete tables are in <code>report/investigation/*.csv</code>.</p>")

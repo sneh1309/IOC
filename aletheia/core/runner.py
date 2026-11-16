@@ -29,7 +29,7 @@ READ_ONLY_COMMANDS = {
     "driverquery", "bcdedit", "manage-bde", "auditpol", "cmdkey",
     # optional third-party read-only scanners (see integrations/external.py)
     # macOS investigation (sub-commands restricted by ALLOWED_FIRST_ARGS below)
-    "log", "pmset", "sfltool", "systemextensionsctl", "systemsetup", "kmutil", "sharing",
+    "log", "pmset", "sfltool", "security", "systemextensionsctl", "systemsetup", "kmutil", "sharing",
     "yara", "clamscan", "chkrootkit", "rkhunter", "osqueryi", "hayabusa", "chainsaw",
     "autorunsc", "autorunsc64", "sigcheck", "sigcheck64", "lynis", "loki", "capa", "gpg",
 }
@@ -44,6 +44,7 @@ FORBIDDEN_TOKENS = {
     "launchctl": {"load", "unload", "bootout", "bootstrap", "kill", "remove", "start", "stop", "enable", "disable",
                   "kickstart", "setenv", "unsetenv", "config", "submit", "asuser", "reboot"},
     "crontab": {"-r", "-e"},
+    "security": {"-d", "-i"},
     "clamscan": {"--remove", "--move", "--copy"},
     "wevtutil": {"cl", "clear-log", "sl", "set-log", "im", "install-manifest", "um", "uninstall-manifest"},
     "netsh": {"add", "delete", "set", "reset"},
@@ -64,6 +65,7 @@ ALLOWED_FIRST_ARGS = {
     "csrutil": {"status", "authenticated-root"},
     "spctl": {"--status"},
     "fdesetup": {"status", "isactive"},
+    "security": {"dump-keychain"},        # metadata only; "-d" (dump secrets) is forbidden below
 }
 # Every argument of these must start with one of the prefixes.
 ARG_PREFIX_ONLY = {"systemsetup": ("-get",)}

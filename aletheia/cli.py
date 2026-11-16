@@ -47,7 +47,8 @@ def cmd_scan(args) -> int:
     options = {"mac_investigation": bool(args.mac_root) or (IS_MACOS and not args.no_mac_investigation),
                "mac_root": args.mac_root, "watch": [w for item in (args.watch or []) for w in item.split(",")],
                "days": args.days, "include_content": args.include_content,
-               "date_from": args.date_from, "date_to": args.date_to}
+               "date_from": args.date_from, "date_to": args.date_to,
+               "owner_emails": [w.strip() for item in (args.owner_email or []) for w in item.split(",") if w.strip()]}
     for flag, val in (("--from", args.date_from), ("--to", args.date_to)):
         if val:
             try:
@@ -251,6 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--watch", action="append", metavar="TERM",
                    help="e-mail address / name / phone / keyword to look for in mail, messages, browser history "
                         "(repeatable or comma-separated)")
+    s.add_argument("--owner-email", action="append", metavar="EMAIL",
+                   help="the device OWNER's own e-mail address(es); accounts that are not the owner's get flagged")
     s.add_argument("--days", type=int, default=90,
                    help="how far back to search (default 90) - ignored when --from/--to are given")
     s.add_argument("--from", dest="date_from", metavar="YYYY-MM-DD",

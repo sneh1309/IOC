@@ -986,6 +986,52 @@ def mac_profiles(a, db):
                       "Device Management"}], confidence="medium", category="macos")]
 
 
+@rule("MAC-009", "E-mail account signed in that is not the owner's / watched account present", "macos")
+def mac_foreign_accounts(a, db):
+    inv = _inv(a)
+    owner = inv.get("owner_emails") or []
+    watch = inv.get("watch") or []
+    q10 = next((q for q in inv.get("questions", []) if q["id"] == "Q10"), None)
+    if not q10:
+        return []
+    out = []
+    t = q10["tables"]["E-mail accounts on this Mac"]
+    rows = [dict(zip(t["columns"], r)) for r in t["rows"]]
+    t2 = q10["tables"]["Browser profiles signed in"]
+    rows += [dict(zip(t2["columns"], r)) | {"source": r[1]} for r in t2["rows"]]
+    t3 = q10["tables"]["Saved website logins (usernames only)"]
+    rows += [{"account": r[1], "source": f"saved login for {r[0]} ({r[5]})", "added": r[2]} for r in t3["rows"]]
+    seen = set()
+    for r in rows:
+        acct = str(r.get("account") or "").lower()
+        if "@" not in acct or acct in seen:
+            continue
+        seen.add(acct)
+        hit = [w for w in watch if w in acct]
+        if hit:
+            out.append(finding("MAC-009", f"WATCHED e-mail account {acct} is signed in / saved on this Mac ({r.get('source')})",
+                               "high", "T1078", "An account matching a watched address has been used on this Mac.",
+                               [_ev("mac_investigation", r.get("source"), acct, added=r.get("added"))],
+                               "Establish who signed in to this account on this Mac and when (see Q10 tables).", [],
+                               confidence="high", category="macos"))
+        elif owner and acct not in owner:
+            out.append(finding("MAC-010", f"E-mail account {acct} on this Mac is not one of the owner's ({r.get('source')})",
+                               "medium", "T1078", "An e-mail account other than the owner's is configured or saved here.",
+                               [_ev("mac_investigation", r.get("source"), acct, added=r.get("added"))],
+                               "Ask the owner whether they recognise this account.", [], confidence="medium",
+                               category="macos"))
+    rem = q10["tables"]["Removed / previously used accounts (traces)"]
+    for r in rem["rows"][:50]:
+        d = dict(zip(rem["columns"], r))
+        if any(w in str(d.get("account", "")).lower() for w in watch):
+            out.append(finding("MAC-011", f"Trace of removed account {d.get('account')} matches a watched address",
+                               "high", "T1070", "A watched address was found in data of an account that has since been "
+                               "removed from this Mac.", [_ev("mac_investigation", d.get("location"), d.get("evidence"))],
+                               "Preserve and examine; the account was used and later removed.", [],
+                               confidence="medium", category="macos"))
+    return out
+
+
 # =================================================================== RUNNER
 def run_all(artifacts: dict, db, log=None) -> list:
     findings = []

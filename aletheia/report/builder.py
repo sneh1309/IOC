@@ -43,7 +43,7 @@ def _investigation(ctx):
     inv = ctx.artifacts.get("mac_investigation")
     if not inv:
         return None
-    return {k: inv.get(k) for k in ("mode", "days", "range", "watch", "include_content", "access_problems", "databases",
+    return {k: inv.get(k) for k in ("mode", "days", "range", "watch", "owner_emails", "include_content", "access_problems", "databases",
                                      "questions")}
 
 

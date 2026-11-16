@@ -27,6 +27,7 @@
 | Q7 | Is someone **accessing it remotely**? | Screen Sharing, Remote Login (SSH) and Remote Management status, remote-session log events, Apple IDs that sync data to other devices |
 | Q8 | What emails were **forwarded or deleted**? | Apple Mail index: "Fwd:" messages, Trash/Deleted Items, deleted flags |
 | Q9 | Were logs or settings **tampered with**? | Log-erase / clock-change / privacy-reset events, boot/shutdown history, cleared shell history |
+| Q10 | Which **e-mail accounts** are or were signed in on this Mac (Outlook, Gmail, iCloud, others), including **removed** ones? | macOS Internet Accounts, every account inside Apple Mail, Outlook for Mac, Thunderbird, Chrome/Edge/Firefox sign-ins and saved logins (usernames only), webmail visits and sign-in/sign-out pages, Keychain entries (names only, passwords never read), leftover folders of removed Mail accounts, addresses recovered from deleted database pages, account add/remove events in the system log |
 
 ---
 
@@ -94,7 +95,9 @@ macOS hides Mail, Messages, Safari and privacy settings from all programs unless
    | Client / device owner name | `<owner's name>` |
    | Organization | `Bercell Integrated Technologies` |
    | Evidence item | `MacBook Air 13" M2, S/N C02XXXXXXX` |
-   | **Watch for** | the suspect email address(es), names or phone numbers, comma-separated |
+   | **A) Owner e-mail(s)** | The **owner's own** addresses, e.g. `owner.name@hotmail.com, owner.name@gmail.com`. Any other account found on the Mac gets flagged as *not the owner's*. |
+| **B) Suspect e-mail(s)** | The address mail was **forwarded to**, or the other person's own address, e.g. `someone@hotmail.com`. |
+| **C) Other terms** | Optional: the other person's name or phone number, e.g. `Jane Smith, 705-555-0100`. Phone numbers match in any format. |
    | **From date** | The first day you care about, e.g. `2026-10-01`. **Recommended: a date range is much faster** (minutes instead of up to 40). Press Enter to skip and use "last N days". |
 | **To date** | The last day, e.g. `2026-11-15` (Enter = today). Both dates are included. |
 | Days back (only if no From date) | `90` (Enter). Use `365` if the problem is older; it takes longer. |

@@ -368,7 +368,8 @@ class TestMacInvestigationOffline(TmpCase):
         before = self._hashes(vol)
         res = run_scan(CaseInfo(case_id="MAC-1", examiner="CI"), os.path.join(self.tmp, "out"), profile="quick",
                        log=lambda *a, **k: None,
-                       options={"mac_investigation": True, "mac_root": vol, "watch": [info["watched"]], "days": 3650})
+                       options={"mac_investigation": True, "mac_root": vol, "watch": [info["watched"]], "days": 3650,
+                                "owner_emails": ["owner@example.com"]})
         after = self._hashes(vol)
         self.assertEqual(before, after, "evidence volume was modified (content, mtime or new -wal/-shm files)")
         case = res["summary"]["case_dir"]
@@ -376,7 +377,19 @@ class TestMacInvestigationOffline(TmpCase):
         self.assertFalse(os.path.exists(os.path.join(case, "_work")), "working copies must be removed before sealing")
         data = json.load(open(os.path.join(case, "report", "report.json")))
         qs = {q["id"]: q for q in data["investigation"]["questions"]}
-        self.assertEqual(set(qs), {f"Q{i}" for i in range(1, 10)})
+        self.assertEqual(set(qs), {f"Q{i}" for i in range(1, 11)})
+        q10 = qs["Q10"]["tables"]
+        accts = {r[0] for r in q10["E-mail accounts on this Mac"]["rows"]}
+        self.assertTrue({"owner@example.com", "other.person@example.org", "tb.user@example.org"} <= accts, accts)
+        removed = " ".join(str(r[0]) for r in q10["Removed / previously used accounts (traces)"]["rows"])
+        self.assertIn("removed.account@example.org", removed)   # carved from deleted DB page
+        self.assertIn("gone.mailbox@example.org", removed)      # leftover Apple Mail folder
+        self.assertEqual(q10["Saved website logins (usernames only)"]["total"], 1)
+        self.assertNotIn("ENCRYPTED", json.dumps(data))           # passwords never read
+        self.assertEqual(q10["Browser profiles signed in"]["rows"][0][0], "other.person@example.org")
+        services = {r[0] for r in q10["Webmail use from browsers"]["rows"]}
+        self.assertTrue({"Gmail", "Outlook.com / Hotmail"} <= services, services)
+        self.assertGreaterEqual(q10["Webmail sign-in / sign-out pages"]["total"], 1)
         t = qs["Q1"]["tables"]
         self.assertEqual(t["Mail sent/forwarded to watched addresses"]["total"], 2)
         self.assertEqual(t["Mail rules that forward/redirect"]["total"], 1)
@@ -388,7 +401,7 @@ class TestMacInvestigationOffline(TmpCase):
         self.assertEqual(qs["Q5"]["tables"]["IP address leases (DHCP)"]["rows"][0][2], "192.168.50.23")
         self.assertGreaterEqual(qs["Q3"]["tables"]["Downloads"]["total"], 2)
         rules_hit = {f["rule_id"] for f in data["findings"]}
-        for r in ("MAC-001", "MAC-002", "MAC-005", "MAC-006"):
+        for r in ("MAC-001", "MAC-002", "MAC-005", "MAC-006", "MAC-009", "MAC-010"):
             self.assertIn(r, rules_hit)
         # Apple's own app with Accessibility must not be flagged
         self.assertFalse(any("com.apple.Terminal" in f["title"] for f in data["findings"]))
