@@ -112,9 +112,27 @@ else
 fi
 read -r -p "  Collect message TEXT too? (default: dates/contacts only) [y/N]: " CONTENT
 DEFAULT_OUT="$ROOT/cases"
-read -r -p "  Save results to [$DEFAULT_OUT]: " OUT
-OUT="${OUT:-$DEFAULT_OUT}"
+echo
+echo "  Where to save the results. Press Return to save on the USB stick (recommended):"
+echo "    $DEFAULT_OUT"
+while true; do
+  read -r -p "  Save results to [Return = USB stick]: " OUT
+  OUT="${OUT/#\~/$HOME}"
+  if [ -z "$OUT" ]; then OUT="$DEFAULT_OUT"; break; fi
+  case "$OUT" in
+    /*) break ;;   # full path given
+    *) warn "Please press Return for the USB stick, or type a FULL folder path starting with / (e.g. /Volumes/EVIDENCE/cases)" ;;
+  esac
+done
+case "$OUT" in
+  /Users/*|/private/*|/tmp/*|/var/*)
+    warn "That folder is on THIS Mac's own disk. Saving there writes to the evidence computer."
+    read -r -p "    Type YES to save there anyway, or press Return to use the USB stick: " A
+    [ "$A" = "YES" ] || OUT="$DEFAULT_OUT" ;;
+esac
 mkdir -p "$OUT" 2>/dev/null || fail "Cannot write to $OUT"
+OUT="$(cd "$OUT" && pwd)"
+echo "  Results will be saved in: $OUT"
 
 ARGS=(scan --examiner "$EXAMINER" --profile standard --days "$DAYS" --output "$OUT" --no-prompt --analysis-only
       --purpose "Owner-authorised read-only examination (macOS investigation)")
