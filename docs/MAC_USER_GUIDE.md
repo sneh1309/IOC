@@ -48,7 +48,7 @@
 4. **Portable Python** (recommended, so nothing is installed on the client's Mac):
     1. Open https://github.com/astral-sh/python-build-standalone/releases and pick the latest release.
     2. Download the file ending in **`-aarch64-apple-darwin-install_only.tar.gz`** (Apple Silicon: M1/M2/M3/M4) **or** **`-x86_64-apple-darwin-install_only.tar.gz`** (Intel Macs). Pick a `cpython-3.12.x` file. To know which Mac you have: Apple menu → About This Mac → **Chip: Apple M…** = aarch64, **Processor: Intel** = x86_64.
-    3. Extract it. You get a folder called `python`. Copy it to `EVIDENCE/aletheia/python/`, so that `EVIDENCE/aletheia/python/bin/python3` exists.
+    3. Extract it. You get a folder called `python`. Copy it to `EVIDENCE/aletheia/python/`, so that `EVIDENCE/aletheia/python/bin/` contains `python3.12` (a `python3` shortcut may be missing on exFAT sticks; that is fine).
     4. If you prepared the stick **on a Mac**, run this once on *your* Mac so Gatekeeper doesn't block it later:
       `xattr -dr com.apple.quarantine /Volumes/EVIDENCE/aletheia`
     > Without portable Python, the tool uses the Mac's own Python **only if it is already installed**. If neither is available, it stops without changing anything.

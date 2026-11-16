@@ -28,8 +28,15 @@ echo
 
 # ---------------------------------------------------------------- 1. Python
 PY=""
-if [ -x "$ROOT/python/bin/python3" ]; then
-  PY="$ROOT/python/bin/python3"                      # portable Python on the USB (preferred)
+# Portable Python on the USB (preferred). exFAT cannot store symlinks, so also accept python3.NN directly.
+for c in "$ROOT/python/bin/python3" "$ROOT"/python/bin/python3.1[0-9] "$ROOT"/python/bin/python3.9; do
+  if [ -f "$c" ] && [ -z "$PY" ]; then
+    [ -x "$c" ] || /bin/chmod +x "$c" 2>/dev/null   # (on the USB stick only)
+    "$c" -c 'import sys' >/dev/null 2>&1 && PY="$c"
+  fi
+done
+if [ -n "$PY" ]; then
+  :
 elif /usr/bin/xcode-select -p >/dev/null 2>&1 && [ -x /usr/bin/python3 ]; then
   PY="/usr/bin/python3"                              # Apple's Python - only if already installed
 else
